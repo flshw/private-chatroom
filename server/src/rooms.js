@@ -154,6 +154,23 @@ class Rooms {
     return due.length;
   }
 
+  /* Public directory: only issued/active, unexpired, non-revoked rooms.
+   * Deliberately omits roomId prefix hash material, owner, tokens, keys,
+   * signatures, message/file counts and anything that identifies a member. */
+  publicList() {
+    const now = Date.now();
+    return this.db.activeRooms()
+      .filter(r => r.expires_at > now && !r.revoke_at)
+      .sort((a, b) => b.created_at - a.created_at)
+      .map(r => ({
+        name: r.name,
+        status: r.status,
+        remainSeconds: Math.max(0, Math.floor((r.expires_at - now) / 1000)),
+        maxMembers: r.max_members,
+        onlineCount: this.hub ? this.hub.onlineCount(r.id) : 0
+      }));
+  }
+
   /* Non-sensitive status for client self-check. No session required. */
   status(roomId) {
     const room = this.db.room(roomId);

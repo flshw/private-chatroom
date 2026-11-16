@@ -17,7 +17,7 @@
 本地验证结果（2026-11-16）：
 
 - `node tools/verify-pc-crypto.js`：**35 / 35 通过**（含单文件客户端模块完整性检查）
-- `node tools/smoke-pc.js`：**27 / 27 通过**
+- `node tools/smoke-pc.js`：**33 / 33 通过**（含公开房间目录、在线人数、房主自行销毁）
 
 ## 目录结构
 

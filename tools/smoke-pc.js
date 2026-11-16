@@ -125,6 +125,7 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
     health.body.pcVersion === P.PC_RELEASE_VERSION && health.body.protocol === P.PROTOCOL_VERSION);
 
   const uname = 'smoke_' + Date.now().toString(36);
+  const roomName = '冒烟测试房_' + Date.now().toString(36);
   const reg = await jsonPost('/auth/register', { username: uname, password: 'strong-pass-123' });
   check('注册个人账号成功', reg.status === 200 && reg.body.ok);
   const login = await jsonPost('/auth/login', { username: uname, password: 'strong-pass-123' });
@@ -134,7 +135,7 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
   const applyRes = await fetch(BASE + '/pc/api/rooms/apply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({ name: '冒烟测试房', ttlSeconds: 3600, maxMembers: 6 })
+    body: JSON.stringify({ name: roomName, ttlSeconds: 3600, maxMembers: 6 })
   });
   const html = await applyRes.text();
   check('申请自动通过并签发 HTML', applyRes.status === 200 &&
@@ -154,6 +155,17 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
   check('/status 提供 serverTime 与剩余时间', st.status === 200 && st.body.ok &&
     !!st.body.serverTime && st.body.remainSeconds > 0);
 
+  /* public live-room directory: no session, allowlisted fields only */
+  const pubRes = await fetch(BASE + '/pc/api/rooms/public');
+  const pubBody = await pubRes.json();
+  const pubRoom = pubBody.rooms && pubBody.rooms.find(r => r.name === roomName);
+  check('公开房间列表无需登录且包含新房间',
+    pubRes.status === 200 && pubBody.ok && !!pubRoom && pubRoom.status === 'issued');
+  check('公开列表只暴露白名单字段（无 token/密钥/房主/id）',
+    !!pubRoom && Object.keys(pubRoom).sort().join(',') === 'maxMembers,name,onlineCount,remainSeconds,status' &&
+    !/token|key|owner|hash|sig|roomid/i.test(JSON.stringify(pubRoom)));
+  check('公开列表在线人数为入房前的 0', !!pubRoom && pubRoom.onlineCount === 0);
+
   /* two members with independent UK_i */
   const aliceUk = C.generateUK(), bobUk = C.generateUK();
   const alice = await makeMember('阿明', cfg, aliceUk);
@@ -161,6 +173,9 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
   const bob = await makeMember('小雨', cfg, bobUk);
   check('成员 B 入房并验签成员名单成功', bob.joined && bob.sid && bob.joinedFrame.memberList.members.length === 2);
   await new Promise(r => setTimeout(r, 200));
+  const pubLive = await (await fetch(BASE + '/pc/api/rooms/public')).json();
+  const pubLiveRoom = pubLive.rooms && pubLive.rooms.find(r => r.name === roomName);
+  check('公开列表在线人数随成员入房更新为 2', !!pubLiveRoom && pubLiveRoom.onlineCount === 2);
   check('成员 A 收到 B 加入后的签名名单广播',
     alice.keyLists.length >= 1 && alice.members.size === 2);
   check('成员名单 selfSig 逐条验签通过（A 侧）', alice.version >= 2);
@@ -236,6 +251,13 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
   check('管理员强制销毁房间（无令牌拒绝）', destroyed.status === 403 || destroyed.body.ok === false);
   const st3 = await api('/room/' + cfg.roomId + '/status');
   check('销毁后房间状态仍非 invalid（令牌保护）', st3.status === 200);
+
+  /* owner dissolves -> room disappears from the public directory */
+  const dissolved = await api('/rooms/' + cfg.roomId + '/dissolve', { method: 'POST' });
+  check('房主可解散自己的房间', dissolved.status === 200 && dissolved.body.ok === true);
+  const pubAfter = await (await fetch(BASE + '/pc/api/rooms/public')).json();
+  check('解散后房间从公开列表消失',
+    !(pubAfter.rooms || []).some(r => r.name === roomName));
 
   console.log('\n=== 结果: ' + passed + ' 通过 / ' + failed + ' 失败 ===');
   process.exit(failed ? 1 : 0);

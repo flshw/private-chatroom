@@ -267,6 +267,11 @@ class Hub {
     });
   }
 
+  onlineCount(roomId) {
+    const map = this.byRoom.get(roomId);
+    return map ? map.size : 0;
+  }
+
   stats() {
     let clients = 0;
     for (const m of this.byRoom.values()) clients += m.size;

@@ -171,6 +171,11 @@ function createHttpServer(options) {
       if (!user) return sendJson(res, 401, { ok: false, error: '需要登录' });
       return sendJson(res, 200, { ok: true, rooms: rooms.listByOwner(user.id) });
     }
+    /* Public read-only directory of live rooms. No session, no credentials,
+     * no identifiers or keys — just enough to see what is open right now. */
+    if (pathname === API + '/rooms/public' && req.method === 'GET') {
+      return sendJson(res, 200, { ok: true, rooms: rooms.publicList(), serverTime: Date.now() });
+    }
     if (pathname === API + '/rooms/apply' && req.method === 'POST') {
       const user = requireUser();
       if (!user) return sendJson(res, 401, { ok: false, error: '需要登录' });
