@@ -14,6 +14,7 @@ const { Accounts } = require('./accounts');
 const { Issuer } = require('./issuer');
 const { Rooms } = require('./rooms');
 const { Hub } = require('./hub');
+const { Shares } = require('./shares');
 const { createHttpServer } = require('./http');
 const { config, DATA_DIR, LOG_DIR } = require('./paths');
 
@@ -38,9 +39,11 @@ async function boot() {
   const accounts = new Accounts(db, logger);
   const issuer = new Issuer(db, keys, P.canonicalJSON, logger);
   const hub = new Hub({ db, keys, canonicalJSON: P.canonicalJSON, logger, serverSecret: keys.serverSecret() });
+  const shares = new Shares(db, logger);
   const rooms = new Rooms(db, keys, issuer, accounts, hub, logger);
+  rooms.shares = shares;
   hub.rooms = rooms;
-  const srv = createHttpServer({ accounts, rooms, hub, db, keyStore: keys, logger });
+  const srv = createHttpServer({ accounts, rooms, hub, db, keyStore: keys, logger, shares });
   httpServer = srv.server;
   wss = srv.wss;
   heartbeat = srv.heartbeat;

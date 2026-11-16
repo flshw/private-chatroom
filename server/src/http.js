@@ -89,7 +89,7 @@ function makeServer(handler) {
 }
 
 function createHttpServer(options) {
-  const { accounts, rooms, hub, db, keyStore, logger } = options;
+  const { accounts, rooms, hub, db, keyStore, logger, shares } = options;
   const API = config.apiPrefix;
   const PUB = config.publicPrefix;
   const server = makeServer(async (req, res) => {
@@ -106,6 +106,25 @@ function createHttpServer(options) {
     }
     if (pathname === PUB + '/admin' || pathname === PUB + '/admin/') {
       return sendFile(res, path.join(ADMIN_DIR, 'index.html'));
+    }
+    /* Static vendor assets (QR generator for the portal). */
+    if (pathname === PUB + '/vendor/qrcode.js') {
+      return sendFile(res, path.join(PUBLIC_DIR, 'vendor', 'qrcode.js'));
+    }
+    /* Share-code entry: a QR scan opens the signed client HTML INLINE (not as
+     * a download), so any browser joins the room directly. The code is a bearer
+     * capability equivalent to the downloaded file; it is revoked on reissue
+     * or room destruction, and rejected once the room expires. */
+    const shareMatch = pathname.match(new RegExp('^' + PUB + '/s/([A-Za-z0-9_-]+)/?$'));
+    if (shareMatch && shares) {
+      const found = shares.resolve(shareMatch[1]);
+      if (!found) {
+        return sendText(res, 404,
+          '<!doctype html><meta charset="utf-8"><title>链接已失效</title>' +
+          '<h2>分享链接已失效</h2><p>房间可能已重新签发、到期或销毁，请向房主索取新的二维码。</p>',
+          'text/html; charset=utf-8');
+      }
+      return sendText(res, 200, found.html, 'text/html; charset=utf-8');
     }
     /* Online room URL is informational only in v0.1. Passing joinToken in a
      * query string would leak it through history/referrer/logs, and serving
@@ -185,6 +204,7 @@ function createHttpServer(options) {
         res.writeHead(200, Object.assign({
           'Content-Type': 'text/html; charset=utf-8',
           'Content-Disposition': 'attachment; filename="' + built.filename + '"',
+          'X-PC-Room-Id': built.roomId,
           'Cache-Control': 'no-store, private'
         }, CORS));
         return res.end(built.html);
@@ -217,6 +237,14 @@ function createHttpServer(options) {
         const result = m[2] === 'dissolve' ? rooms.dissolve(user, m[1]) : rooms.revoke(user, m[1]);
         return sendJson(res, 200, Object.assign({ ok: true }, result));
       } catch (e) { return sendJson(res, e.status || 400, { ok: false, error: e.message }); }
+    }
+    /* Owner-only share links (QR codes) for a room. */
+    m = pathname.match(new RegExp('^' + API + '/rooms/([A-Za-z0-9_]+)/shares$'));
+    if (m && req.method === 'GET') {
+      const user = requireUser();
+      if (!user) return sendJson(res, 401, { ok: false, error: '需要登录' });
+      try { return sendJson(res, 200, Object.assign({ ok: true }, rooms.shareLinks(user.id, m[1]))); }
+      catch (e) { return sendJson(res, e.status || 400, { ok: false, error: e.message }); }
     }
     m = pathname.match(new RegExp('^' + API + '/room/([A-Za-z0-9_]+)/status$'));
     if (m && req.method === 'GET') return sendJson(res, 200, rooms.status(m[1]));

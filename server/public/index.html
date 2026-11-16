@@ -35,6 +35,19 @@ button:disabled{opacity:.5;cursor:default}
 .hint{font-size:11.5px;color:var(--muted);line-height:1.6;margin-top:8px}
 .foot{text-align:center;color:#93a0bd;font-size:11px;margin-top:18px}
 .foot a{color:var(--brand);text-decoration:none}
+.room-item .qr{font-size:12px;color:var(--brand2);background:transparent;border:1px solid var(--brand2);border-radius:8px;padding:6px 9px;white-space:nowrap;cursor:pointer}
+/* QR modal */
+.mask{position:fixed;inset:0;background:rgba(4,8,20,.72);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50}
+.mask.hidden{display:none}
+.qrbox{background:linear-gradient(160deg,var(--panel),#1b2440);border:1px solid var(--line);border-radius:18px;padding:22px;max-width:560px;width:100%;box-shadow:var(--shadow);position:relative}
+.qrbox h2{font-size:17px;margin:0 0 4px}.qrbox .sub{margin-bottom:16px}
+.qrpair{display:flex;gap:16px;flex-wrap:wrap}
+.qrcard{flex:1;min-width:200px;background:#0e1528;border:1px solid var(--line);border-radius:14px;padding:14px;text-align:center}
+.qrcard .lbl{font-size:13px;font-weight:650;margin-bottom:10px}.qrcard .desc{font-size:11px;color:var(--muted);margin:8px 0 0;line-height:1.5}
+.qrcard img{width:168px;height:168px;background:#fff;border-radius:8px;padding:6px;display:block;margin:0 auto}
+.qrcard .link{font-size:10px;color:var(--muted);word-break:break-all;margin-top:8px;display:block;max-height:30px;overflow:hidden}
+.qrclose{position:absolute;top:12px;right:14px;background:transparent;color:var(--muted);border:none;font-size:20px;cursor:pointer;line-height:1}
+.qrnote{font-size:11px;color:var(--muted);line-height:1.6;margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
 </style>
 </head>
 <body>
@@ -78,6 +91,30 @@ button:disabled{opacity:.5;cursor:default}
 
   <div class="foot">CJS flshw@126.com · <a href="/">项目导航</a></div>
 </main>
+<script src="/Pchat/vendor/qrcode.js"></script>
+
+<div class="mask hidden" id="qr-mask">
+  <div class="qrbox">
+    <button class="qrclose" id="qr-close" aria-label="关闭">×</button>
+    <h2>扫码进入聊天室</h2>
+    <p class="sub" id="qr-title">用手机相机或微信扫一扫，无需下载文件，扫码后填昵称即可进入。</p>
+    <div class="qrpair">
+      <div class="qrcard">
+        <div class="lbl">简洁版</div>
+        <div id="qr-lite"></div>
+        <a class="link" id="qr-lite-link" href="#" target="_blank" rel="noopener"></a>
+        <p class="desc">轻量快速 · 文字 / 文件 / 语音条</p>
+      </div>
+      <div class="qrcard">
+        <div class="lbl">豪华版</div>
+        <div id="qr-deluxe"></div>
+        <a class="link" id="qr-deluxe-link" href="#" target="_blank" rel="noopener"></a>
+        <p class="desc">3D 牌桌 / 全双工语音 / 视频小窗 / 联机掼蛋</p>
+      </div>
+    </div>
+    <div class="qrnote">两个二维码使用同一房间凭证，可多人同时使用。重新下载客户端或销毁房间后，旧二维码立即失效，需要重新生成。二维码相当于房间钥匙，请勿随意公开转发。</div>
+  </div>
+</div>
 <script>
 (function(){
   var $=function(id){return document.getElementById(id)};
@@ -118,12 +155,40 @@ button:disabled{opacity:.5;cursor:default}
       var dlx=document.createElement('a');dlx.href='/pc/api/rooms/'+r.roomId+'/client?edition=deluxe';dlx.textContent='豪华版';
       dlx.title='下载会重新签发并轮换凭证，先前下载的客户端立即失效';
       dlWrap.appendChild(dl);dlWrap.appendChild(dlx);
+      var qr=document.createElement('button');qr.className='qr';qr.textContent='二维码';
+      qr.onclick=function(){showQR(r.roomId,r.name)};
       var del=document.createElement('button');del.className='destroy';del.textContent='销毁';
       del.onclick=function(){destroyRoom(r.roomId,r.name)};
-      item.appendChild(grow);item.appendChild(dlWrap);item.appendChild(del);box.appendChild(item);
+      var actions=document.createElement('div');actions.className='dlwrap';
+      actions.appendChild(qr);actions.appendChild(del);
+      item.appendChild(grow);item.appendChild(dlWrap);item.appendChild(actions);box.appendChild(item);
     });
   }
   function fmt(s){s=Math.max(0,s|0);var h=(s/3600)|0,m=((s%3600)/60)|0,x=s%60;return (h<10?'0':'')+h+':'+(m<10?'0':'')+m+':'+(x<10?'0':'')+x}
+  // Share QR codes: fetch owner links, render both editions offline via qrcode.js.
+  function absUrl(p){return location.origin+p}
+  function drawQR(box,url){
+    box.innerHTML='';
+    if(typeof qrcode==='undefined'){box.textContent='二维码组件未加载';return}
+    try{
+      var qr=qrcode(0,'M');qr.addData(url);qr.make();
+      var img=document.createElement('img');img.src=qr.createDataURL(6,4);img.alt='扫码进入';box.appendChild(img);
+    }catch(e){box.textContent='二维码生成失败';}
+  }
+  function showQR(roomId,name){
+    var mask=$('qr-mask');$('qr-title').textContent='房间「'+name+'」· 手机扫码后在浏览器填昵称直接进入，无需下载文件。';
+    $('qr-lite').textContent='加载中…';$('qr-deluxe').textContent='加载中…';
+    mask.classList.remove('hidden');
+    api('/rooms/'+roomId+'/shares').then(function(r){
+      if(!r.body.ok){$('qr-lite').textContent=r.body.error||'获取失败';$('qr-deluxe').textContent='';return}
+      var l=absUrl(r.body.lite||''),d=absUrl(r.body.deluxe||'');
+      drawQR($('qr-lite'),l);drawQR($('qr-deluxe'),d);
+      var la=$('qr-lite-link'),da=$('qr-deluxe-link');
+      la.href=l||'#';la.textContent=l||'';da.href=d||'#';da.textContent=d||'';
+    }).catch(function(e){$('qr-lite').textContent='网络错误';$('qr-deluxe').textContent='';});
+  }
+  $('qr-close').onclick=function(){$('qr-mask').classList.add('hidden')};
+  $('qr-mask').onclick=function(e){if(e.target===$('qr-mask'))$('qr-mask').classList.add('hidden')};
   function destroyRoom(id,name){
     if(!window.confirm('确定销毁房间「'+name+'」？所有成员会被踢出，消息与文件将立即删除，且不可恢复。'))return;
     api('/rooms/'+id+'/dissolve',{method:'POST'}).then(function(r){
@@ -157,7 +222,8 @@ button:disabled{opacity:.5;cursor:default}
     .then(function(r){
       if(r.status!==200){return r.json().then(function(j){amsgt(j.error||'创建失败','err')})}
       var cd=r.headers.get('content-disposition')||'';var mm=cd.match(/filename="([^"]+)"/);var fn=mm?mm[1]:'private-chat.html';
-      return r.blob().then(function(b){var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download=fn;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(u)},2000);amsgt('房间已创建，客户端已下载。请把它发给朋友。','ok');api('/rooms').then(function(x){if(x.body.ok)loadRooms(x.body.rooms)})});
+      var cd2=r.headers.get('x-pc-room-id')||'';
+      return r.blob().then(function(b){var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download=fn;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(u)},2000);amsgt('房间已创建，客户端已下载。下面二维码可直接扫码分享。','ok');api('/rooms').then(function(x){if(x.body.ok)loadRooms(x.body.rooms)});if(cd2)showQR(cd2,$('r-name').value.trim()||'新房间')});
     }).catch(function(e){amsgt('网络错误：'+e.message,'err')});
   };
 })();

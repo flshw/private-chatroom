@@ -491,6 +491,22 @@ window.PCGameClient = (function () {
     function requestStart(players) { sendGame({ kind: 'start', players: players || null }); }
     function requestDeal() { sendGame({ kind: 'deal_request', requestBy: mySid }); }
 
+    /* Auto-arrange my hand using the Guandan grouping strategy (bombs first,
+     * straights/double-straights, triples, pairs, singles; big to small inside
+     * each family). Only the display order of the local hand changes — card
+     * ids and E2EE game data are untouched. */
+    function autoArrange() {
+      if (!window.PCBots || !window.PCGame) return false;
+      var view = state.spectator ? state.targetHand : state.hand;
+      if (!view || !view.length) return false;
+      var arranged = window.PCBots.sortedHand(view, state.level, window.PCGame);
+      if (state.spectator) state.targetHand = arranged;
+      else state.hand = arranged;
+      note('已自动理牌：同类牌归堆，炸弹/顺子在前');
+      onUpdate(state);
+      return true;
+    }
+
     self.state = state;
     self.onMessage = onMessage;
     self.syncSeats = syncSeats;
@@ -498,6 +514,7 @@ window.PCGameClient = (function () {
     self.startMatch = startMatch;
     self.requestStart = requestStart;
     self.requestDeal = requestDeal;
+    self.autoArrange = autoArrange;
     self.play = play;
     self.pass = pass;
     self.requestSpectate = requestSpectate;

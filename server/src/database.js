@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const initSqlJs = require('sql.js');
-const { DATA_DIR, FILES_DIR } = require('./paths');
+const { DATA_DIR, FILES_DIR, SHARES_DIR } = require('./paths');
 
 const DB_FILE = path.join(DATA_DIR, 'private-chat.db');
 
@@ -84,6 +84,17 @@ CREATE TABLE IF NOT EXISTS audit (
   ts INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+/* Share links: a random public code maps to a room + edition. The code is a
+ * bearer capability shown only in the owner's portal (equivalent to the
+ * downloadable client); HTML is cached under SHARES_DIR keyed by its digest. */
+CREATE TABLE IF NOT EXISTS shares (
+  code_hash TEXT PRIMARY KEY,
+  code TEXT NOT NULL,
+  room_id TEXT NOT NULL,
+  edition TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_shares_room ON shares(room_id);
 `;
 
 class Database {
@@ -98,6 +109,7 @@ class Database {
     const SQL = await initSqlJs({ locateFile: f => path.join(__dirname, '..', '..', 'vendor', f) });
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.mkdirSync(FILES_DIR, { recursive: true });
+    fs.mkdirSync(SHARES_DIR, { recursive: true });
     if (fs.existsSync(DB_FILE)) {
       try { this.db = new SQL.Database(fs.readFileSync(DB_FILE)); }
       catch (e) { this.logger('数据库损坏，已重建: ' + e.message); this.db = new SQL.Database(); }
@@ -217,6 +229,23 @@ class Database {
       [f.id, f.roomId, f.size, f.iv, f.ct, f.tag, f.blobPath, f.expiresAt]);
   }
   file(id) { return this.get('SELECT * FROM files WHERE id=?', [id]); }
+
+  /* ---------- share links ---------- */
+  addShare(codeHash, code, roomId, edition, createdAt) {
+    this.run('INSERT OR REPLACE INTO shares(code_hash,code,room_id,edition,created_at) VALUES(?,?,?,?,?)',
+      [codeHash, code, roomId, edition, createdAt]);
+  }
+  shareByHash(codeHash) { return this.get('SELECT * FROM shares WHERE code_hash=?', [codeHash]); }
+  sharesByRoom(roomId) { return this.all('SELECT * FROM shares WHERE room_id=?', [roomId]); }
+  deleteSharesByRoom(roomId) {
+    const rows = this.sharesByRoom(roomId);
+    for (const r of rows) {
+      try { const f = path.join(SHARES_DIR, r.code_hash + '.html'); if (fs.existsSync(f)) fs.unlinkSync(f); }
+      catch (e) { this.logger('删除分享缓存失败: ' + e.message); }
+    }
+    this.run('DELETE FROM shares WHERE room_id=?', [roomId]);
+    return rows.length;
+  }
 
   audit(event, roomId, ts) {
     this.run('INSERT INTO audit(event,room_id,ts) VALUES(?,?,?)', [event, roomId || null, ts || Date.now()]);

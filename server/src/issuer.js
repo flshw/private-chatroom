@@ -52,14 +52,17 @@ class Issuer {
 
   /* Build the signed config block for a room and bake a one-shot HTML string.
    * Returns { html, filename, config, configSig, configDigest, joinToken,
-   *           roomPubKey, roomPrivRef }.
-   * Caller decides whether to persist room metadata (issue vs reissue). */
-  build(roomMeta, serverSecret, edition) {
+   *           roomPubKey, roomPrivRef, creds }.
+   * `creds` may be passed to reuse an existing joinToken + RK pair so that two
+   * editions (download + share QR) share ONE admission credential. Caller
+   * decides whether to persist room metadata (issue vs reissue). */
+  build(roomMeta, serverSecret, edition, creds) {
     const template = this.loadTemplate(edition);
     const isDeluxe = edition === 'deluxe';
     const roomId = roomMeta.roomId;
-    const joinToken = nodeCrypto.randomBytes(P.LIMITS.TOKEN_BYTES).toString('hex');
-    const rk = this.keys.createRoomKey(roomId);
+    const joinToken = creds ? creds.joinToken
+      : nodeCrypto.randomBytes(P.LIMITS.TOKEN_BYTES).toString('hex');
+    const rk = creds ? creds.rk : this.keys.createRoomKey(roomId);
     const configObj = {
       v: P.PROTOCOL_VERSION,
       serverUrl: config.serverUrl,
@@ -89,7 +92,8 @@ class Issuer {
     return {
       html, filename, config: configObj, configSig: sig, configDigest: digest,
       joinToken, joinTokenHash: this.keys.tokenHash(serverSecret, joinToken),
-      roomPubKey: rk.publicKeyPem, roomPrivRef: rk.ref
+      roomPubKey: rk.publicKeyPem, roomPrivRef: rk.ref,
+      creds: { joinToken, rk }
     };
   }
 }

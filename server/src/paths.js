@@ -22,6 +22,7 @@ const DATA_DIR = process.env.PC_DATA_DIR || path.join(ROOT, 'data');
 const KEYS_DIR = process.env.PC_KEYS_DIR || path.join(DATA_DIR, 'keys');
 const LOG_DIR = process.env.PC_LOG_DIR || path.join(DATA_DIR, 'logs');
 const FILES_DIR = path.join(DATA_DIR, 'files');
+const SHARES_DIR = path.join(DATA_DIR, 'shares');
 
 const config = {
   port: envInt('PC_PORT', 8443),
@@ -38,5 +39,5 @@ const config = {
 
 module.exports = {
   ROOT, PUBLIC_DIR, ADMIN_DIR, TEMPLATE_FILE, DELUXE_TEMPLATE_FILE,
-  DATA_DIR, KEYS_DIR, LOG_DIR, FILES_DIR, config
+  DATA_DIR, KEYS_DIR, LOG_DIR, FILES_DIR, SHARES_DIR, config
 };

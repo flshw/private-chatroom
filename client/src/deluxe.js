@@ -8,6 +8,7 @@
 window.PCDeluxe = (function () {
   var game = null, ctx = null, voiceOn = false, selected = {};
   var membersList = [], mySid = null, picked = [], setupOpen = false;
+  var spread = false; // false = stacked by rank (default), true = flat
   var $ = function (id) { return document.getElementById(id); };
 
   function bind(o) {
@@ -107,16 +108,83 @@ window.PCDeluxe = (function () {
     renderGame(game.state);
   }
 
-  function cardEl(c, sel) {
+  var RANK_LABEL = ({ 11: 'J', 12: 'Q', 13: 'K', 14: 'A', 15: '2', 16: '小王', 17: '大王' });
+
+  function cardEl(c, sel, onClick) {
     var d = document.createElement('div');
     d.className = 'pcard' + ((c.s === 'H' || c.s === 'D') ? ' red' : '') + (sel ? ' sel' : '');
-    var r = ({ 11: 'J', 12: 'Q', 13: 'K', 14: 'A', 15: '2', 16: '', 17: '' })[c.r] || c.r;
+    var r = RANK_LABEL[c.r] || c.r;
     var suit = c.s === 'W' ? (c.r === 17 ? '👑' : '🃏') : ({ S: '♠', H: '♥', C: '♣', D: '♦' })[c.s];
     var top = document.createElement('span'); top.textContent = r;
     var bot = document.createElement('span'); bot.className = 'suit'; bot.textContent = suit;
     d.appendChild(top); d.appendChild(bot);
     d.dataset.id = c.id;
+    if (onClick) { d.style.cursor = 'pointer'; d.addEventListener('click', onClick); }
     return d;
+  }
+
+  /* Order ranks the way Guandan players arrange a hand: rockets/bombs and
+   * jokers first, high cards to low, using the engine's arranged order when
+   * available. Falls back to descending rank for safety. */
+  function arrangedOrder(cards, st) {
+    if (window.PCBots && window.PCGame && cards.length) {
+      try { return window.PCBots.sortedHand(cards, st.level, window.PCGame); }
+      catch (e) { /* fall through */ }
+    }
+    return cards.slice().sort(function (a, b) {
+      return (b.s === 'W' ? 100 + b.r : b.r) - (a.s === 'W' ? 100 + a.r : a.r);
+    });
+  }
+
+  /* Render my (or observed target's) hand. Default: same-rank cards overlap
+   * into a stack with a count badge; `spread` shows every card flat. Clicking a
+   * stack toggles ALL cards of that rank (natural for plays: pair/triple/bomb).
+   * Observers get a read-only hand. */
+  function renderHand(hand, shown, st) {
+    hand.innerHTML = '';
+    if (!shown.length) return;
+    var readonly = !!st.spectator;
+    var ordered = arrangedOrder(shown, st);
+    // Group by rank in the arranged order.
+    var groups = [], byRank = {};
+    ordered.forEach(function (c) {
+      var key = c.r;
+      if (!byRank[key]) { byRank[key] = { rank: c.r, cards: [] }; groups.push(byRank[key]); }
+      byRank[key].cards.push(c);
+    });
+    groups.forEach(function (g) {
+      if (spread || g.cards.length === 1) {
+        g.cards.forEach(function (c) {
+          hand.appendChild(cardEl(c, !readonly && !!selected[c.id], readonly ? null : function () {
+            selected[c.id] = !selected[c.id];
+            renderGame(game.state);
+          }));
+        });
+        return;
+      }
+      // Stack: overlap same-rank cards, badge shows how many are held.
+      var stack = document.createElement('div');
+      stack.className = 'pcard-stack' + (g.cards.some(function (c) { return selected[c.id]; }) ? ' sel' : '');
+      var anySel = g.cards.some(function (c) { return selected[c.id]; });
+      g.cards.forEach(function (c, i) {
+        var el = cardEl(c, false, null);
+        el.style.zIndex = String(i + 1);
+        stack.appendChild(el);
+      });
+      var badge = document.createElement('span');
+      badge.className = 'stack-badge'; badge.textContent = '×' + g.cards.length;
+      stack.appendChild(badge);
+      stack.title = (RANK_LABEL[g.rank] || g.rank) + ' × ' + g.cards.length + '（点击全选/取消这一组）';
+      if (!readonly) stack.addEventListener('click', function () {
+        // If all selected, clear; otherwise select the whole rank group.
+        var all = g.cards.every(function (c) { return selected[c.id]; });
+        g.cards.forEach(function (c) { selected[c.id] = !all; });
+        renderGame(game.state);
+      });
+      else stack.style.cursor = 'default';
+      if (anySel) stack.classList.add('sel');
+      hand.appendChild(stack);
+    });
   }
 
   /* Two decks: each ordinary rank appears eight times, each joker twice.
@@ -174,15 +242,8 @@ window.PCDeluxe = (function () {
       table.appendChild(tip);
     }
     // My hand — observers see the ONE target's hand (read-only), players see own.
-    hand.innerHTML = '';
     var shown = st.spectator ? (st.targetHand || []) : (st.hand || []);
-    if (shown.length) {
-      shown.forEach(function (c) {
-        var card = cardEl(c, !st.spectator && !!selected[c.id]);
-        if (st.spectator) card.style.cursor = 'default';
-        hand.appendChild(card);
-      });
-    }
+    renderHand(hand, shown, st);
     // Level / turn / spectator note
     var lv = $('game-level'); if (lv) lv.textContent = '打 ' + game.rankName(st.level) + ' · 第 ' + (st.roundNo || 1) + ' 局';
     var note = $('spectator-note');
@@ -240,6 +301,19 @@ window.PCDeluxe = (function () {
   }
 
   function onPassClick() { game.pass(); }
+
+  function onArrangeClick() {
+    if (!game) return;
+    if (game.state.spectator) { ctx.toast('旁观模式不能整理手牌'); return; }
+    if (!game.autoArrange || !game.autoArrange()) ctx.toast('暂无可整理的手牌');
+    else renderGame(game.state);
+  }
+  function onSpreadClick() {
+    spread = !spread;
+    var b = $('btn-game-spread');
+    if (b) b.textContent = spread ? '⊞ 堆叠' : '↔ 平铺';
+    if (game) renderGame(game.state);
+  }
 
   function onStartClick() {
     if (!game) return;
@@ -370,6 +444,8 @@ window.PCDeluxe = (function () {
     $('btn-game-start') && $('btn-game-start').addEventListener('click', onStartClick);
     $('btn-game-play') && $('btn-game-play').addEventListener('click', onPlayClick);
     $('btn-game-pass') && $('btn-game-pass').addEventListener('click', onPassClick);
+    $('btn-game-arrange') && $('btn-game-arrange').addEventListener('click', onArrangeClick);
+    $('btn-game-spread') && $('btn-game-spread').addEventListener('click', onSpreadClick);
     $('btn-spectate') && $('btn-spectate').addEventListener('click', requestSpectate);
     $('btn-setup-close') && $('btn-setup-close').addEventListener('click', function () { showSetup(false); });
     $('game-setup-mask') && $('game-setup-mask').addEventListener('click', function () { showSetup(false); });

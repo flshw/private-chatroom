@@ -63,7 +63,11 @@ class Rooms {
       roomId, name: v.name, ttlSeconds: v.ttlSeconds, maxMembers: v.maxMembers,
       issuedAt: now, expiresAt: now + v.ttlSeconds * 1000
     };
-    const built = this.issuer.build(meta, this.serverSecret, body.edition);
+    const edition = body.edition === 'deluxe' ? 'deluxe' : 'lite';
+    // One credential for the room; both editions (download + QR) reuse it.
+    const built = this.issuer.build(meta, this.serverSecret, edition);
+    const other = this.issuer.build(meta, this.serverSecret,
+      edition === 'deluxe' ? 'lite' : 'deluxe', built.creds);
     this.db.createRoom({
       id: roomId, ownerId: user.id, name: v.name, status: 'issued',
       ttlSeconds: v.ttlSeconds, maxMembers: v.maxMembers,
@@ -72,8 +76,12 @@ class Rooms {
       roomPubKey: built.roomPubKey, roomPrivRef: built.roomPrivRef, sigCount: 1
     });
     this.db.audit('room_issued', roomId, now);
+    const htmlByEdition = {};
+    htmlByEdition[edition] = built.html;
+    htmlByEdition[edition === 'deluxe' ? 'lite' : 'deluxe'] = other.html;
+    const qr = this.shares ? this.shares.publish(roomId, htmlByEdition) : null;
     this.logger('房间已签发: ' + roomId + ' (' + v.name + ')');
-    return { roomId, expiresAt: meta.expiresAt, filename: built.filename, html: built.html };
+    return { roomId, expiresAt: meta.expiresAt, filename: built.filename, html: built.html, qr };
   }
 
   listByOwner(userId) {
@@ -85,6 +93,18 @@ class Rooms {
       maxMembers: r.max_members, sigCount: r.sig_count,
       clientUrl: config.apiPrefix + '/rooms/' + r.id + '/client'
     }));
+  }
+
+  /* Current share links for a room, shown only to its owner in the portal. */
+  shareLinks(userId, roomId) {
+    const room = this.db.room(roomId);
+    if (!room || room.owner_id !== userId) throw Object.assign(new Error('房间不存在'), { status: 404 });
+    if (!this.shares) return { lite: null, deluxe: null };
+    const out = { lite: null, deluxe: null };
+    this.db.sharesByRoom(roomId).forEach(row => {
+      out[row.edition] = config.publicPrefix + '/s/' + row.code;
+    });
+    return out;
   }
 
   /* Download (re)issued client. Reissue rotates joinToken AND RK pair. */
@@ -104,6 +124,8 @@ class Rooms {
       issuedAt: now, expiresAt: room.expires_at
     };
     const built = this.issuer.build(meta, this.serverSecret, edition);
+    const other = this.issuer.build(meta, this.serverSecret,
+      edition === 'deluxe' ? 'lite' : 'deluxe', built.creds);
     // Old RK private key and token are invalidated immediately.
     this.keys.deleteRoomKey(roomId, room.room_priv_ref);
     this.db.reissueRoom(roomId, {
@@ -111,16 +133,21 @@ class Rooms {
       roomPubKey: built.roomPubKey, roomPrivRef: built.roomPrivRef,
       issuedAt: now, expiresAt: meta.expiresAt
     });
+    const htmlByEdition = {};
+    htmlByEdition[edition] = built.html;
+    htmlByEdition[edition === 'deluxe' ? 'lite' : 'deluxe'] = other.html;
+    const qr = this.shares ? this.shares.publish(roomId, htmlByEdition) : null;
     if (this.hub) this.hub.kickAll(roomId, 'reissued');
     this.db.audit('room_reissued', roomId, now);
     this.logger('房间重新签发: ' + roomId);
-    return { filename: built.filename, html: built.html };
+    return { filename: built.filename, html: built.html, qr };
   }
 
   revoke(user, roomId) {
     const room = this.db.room(roomId);
     if (!room || room.owner_id !== user.id) throw Object.assign(new Error('房间不存在'), { status: 404 });
     this.db.revokeRoom(roomId, Date.now());
+    if (this.shares) this.shares.revoke(roomId);
     this.keys.deleteRoomKey(roomId, room.room_priv_ref);
     if (this.hub) this.hub.kickAll(roomId, 'revoked');
     this.db.audit('room_revoked', roomId, Date.now());
@@ -140,6 +167,7 @@ class Rooms {
     if (this.hub) this.hub.broadcastExpired(roomId, reason || 'expired');
     this.db.setRoomStatus(roomId, 'destroying');
     this.db.destroyRoom(roomId);
+    if (this.shares) this.shares.revoke(roomId);
     this.keys.deleteRoomKey(roomId, room.room_priv_ref);
     if (this.hub) this.hub.clearRoom(roomId);
     this.db.audit('room_destroyed', roomId, Date.now());
