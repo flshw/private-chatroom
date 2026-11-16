@@ -32,7 +32,7 @@ window.PCGameClient = (function () {
     var onUpdate = ctx.onUpdate || function () {};
     var botsEnabled = !!ctx.bots;        // deluxe only; simple edition has none
     var botTimer = null;                 // scheduler for the local bot's next move
-    var botThinkingMs = 650;             // small delay so humans can follow along
+    var botThinkingMs = 1400;            // slower: give a human a clear window to tap 过牌/出牌 before the bot grabs the turn
 
     function isBotSid(sid) { return BOT_SIDS.indexOf(sid) !== -1; }
     function botNick(sid) { var i = BOT_SIDS.indexOf(sid); return i < 0 ? '机器人' : BOT_NICKS[i]; }
@@ -322,7 +322,7 @@ window.PCGameClient = (function () {
     function onPass(msg) {
       state.passes++;
       var seat = seatOfSid(msg.by);
-      note((state.seats[seat] ? state.seats[seat].nickname : '玩家') + ' 过牌');
+      note((msg.by === mySid ? '你' : (state.seats[seat] ? state.seats[seat].nickname : '玩家')) + ' 过牌');
       if (state.passes >= state.seats.length - 1 - state.finishOrder.length) {
         // New trick led by last winner.
         state.table = null; state.tablePattern = null; state.passes = 0;

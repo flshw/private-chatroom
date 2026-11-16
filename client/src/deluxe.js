@@ -115,10 +115,18 @@ window.PCDeluxe = (function () {
     d.className = 'pcard' + ((c.s === 'H' || c.s === 'D') ? ' red' : '') + (sel ? ' sel' : '');
     var r = RANK_LABEL[c.r] || c.r;
     var suit = c.s === 'W' ? (c.r === 17 ? '👑' : '🃏') : ({ S: '♠', H: '♥', C: '♣', D: '♦' })[c.s];
-    var top = document.createElement('span'); top.textContent = r;
-    var bot = document.createElement('span'); bot.className = 'suit'; bot.textContent = suit;
-    d.appendChild(top); d.appendChild(bot);
+    // Corner pip (rank + suit) in the top-left, like a real poker card. When
+    // cards are fanned vertically each card's corner stays visible, so the
+    // player can read the suit of an individual card and tap just that card.
+    var corner = document.createElement('span');
+    corner.className = 'pip';
+    var cr = document.createElement('b'); cr.textContent = r;
+    var cs = document.createElement('i'); cs.textContent = suit;
+    corner.appendChild(cr); corner.appendChild(cs);
+    var big = document.createElement('span'); big.className = 'suit'; big.textContent = suit;
+    d.appendChild(corner); d.appendChild(big);
     d.dataset.id = c.id;
+    d.title = r + suit;
     if (onClick) { d.style.cursor = 'pointer'; d.addEventListener('click', onClick); }
     return d;
   }
@@ -136,10 +144,12 @@ window.PCDeluxe = (function () {
     });
   }
 
-  /* Render my (or observed target's) hand. Default: same-rank cards overlap
-   * into a stack with a count badge; `spread` shows every card flat. Clicking a
-   * stack toggles ALL cards of that rank (natural for plays: pair/triple/bomb).
-   * Observers get a read-only hand. */
+  /* Render my (or observed target's) hand.
+   * Default: same-rank cards are fanned VERTICALLY (each card steps down and
+   * right a little) so every card's rank+suit corner stays readable and each
+   * card can be tapped INDIVIDUALLY — selecting a pair/triple is done by
+   * tapping the specific cards you want, not a whole-group toggle.
+   * `spread` flattens every card in a single row. Observers get a read-only hand. */
   function renderHand(hand, shown, st) {
     hand.innerHTML = '';
     if (!shown.length) return;
@@ -152,37 +162,35 @@ window.PCDeluxe = (function () {
       if (!byRank[key]) { byRank[key] = { rank: c.r, cards: [] }; groups.push(byRank[key]); }
       byRank[key].cards.push(c);
     });
+    function toggleOne(c) {
+      return readonly ? null : function (e) {
+        if (e) e.stopPropagation();
+        selected[c.id] = !selected[c.id];
+        renderGame(game.state);
+      };
+    }
     groups.forEach(function (g) {
       if (spread || g.cards.length === 1) {
         g.cards.forEach(function (c) {
-          hand.appendChild(cardEl(c, !readonly && !!selected[c.id], readonly ? null : function () {
-            selected[c.id] = !selected[c.id];
-            renderGame(game.state);
-          }));
+          hand.appendChild(cardEl(c, !readonly && !!selected[c.id], toggleOne(c)));
         });
         return;
       }
-      // Stack: overlap same-rank cards, badge shows how many are held.
+      // Vertical fan: each card offset down/right just enough to expose its
+      // top-left rank+suit pip, so a player can read and tap a single card.
       var stack = document.createElement('div');
-      stack.className = 'pcard-stack' + (g.cards.some(function (c) { return selected[c.id]; }) ? ' sel' : '');
-      var anySel = g.cards.some(function (c) { return selected[c.id]; });
+      stack.className = 'pcard-stack';
+      // Reserve the fanned footprint so cards don't overflow the hand row.
+      stack.style.width = (44 + 10 * (g.cards.length - 1)) + 'px';
+      stack.style.height = (62 + 22 * (g.cards.length - 1)) + 'px';
+      // z-index rises with row so lower cards' pips are not covered.
       g.cards.forEach(function (c, i) {
-        var el = cardEl(c, false, null);
+        var el = cardEl(c, !readonly && !!selected[c.id], toggleOne(c));
+        el.style.setProperty('--i', String(i));
         el.style.zIndex = String(i + 1);
         stack.appendChild(el);
       });
-      var badge = document.createElement('span');
-      badge.className = 'stack-badge'; badge.textContent = '×' + g.cards.length;
-      stack.appendChild(badge);
-      stack.title = (RANK_LABEL[g.rank] || g.rank) + ' × ' + g.cards.length + '（点击全选/取消这一组）';
-      if (!readonly) stack.addEventListener('click', function () {
-        // If all selected, clear; otherwise select the whole rank group.
-        var all = g.cards.every(function (c) { return selected[c.id]; });
-        g.cards.forEach(function (c) { selected[c.id] = !all; });
-        renderGame(game.state);
-      });
-      else stack.style.cursor = 'default';
-      if (anySel) stack.classList.add('sel');
+      stack.title = (RANK_LABEL[g.rank] || g.rank) + ' × ' + g.cards.length + '（点单张牌可选/取消）';
       hand.appendChild(stack);
     });
   }
