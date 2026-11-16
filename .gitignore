@@ -13,3 +13,4 @@ Thumbs.db
 # Editor backups
 *.swp
 *.tmp
+node_modules/
