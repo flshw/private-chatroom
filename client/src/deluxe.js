@@ -26,7 +26,7 @@ window.PCDeluxe = (function () {
 
   function cardEl(c, sel) {
     var d = document.createElement('div');
-    d.className = 'card' + ((c.s === 'H' || c.s === 'D') ? ' red' : '') + (sel ? ' sel' : '');
+    d.className = 'pcard' + ((c.s === 'H' || c.s === 'D') ? ' red' : '') + (sel ? ' sel' : '');
     var r = ({ 11: 'J', 12: 'Q', 13: 'K', 14: 'A', 15: '2', 16: '', 17: '' })[c.r] || c.r;
     var suit = c.s === 'W' ? (c.r === 17 ? '👑' : '🃏') : ({ S: '♠', H: '♥', C: '♣', D: '♦' })[c.s];
     var top = document.createElement('span'); top.textContent = r;
@@ -61,20 +61,33 @@ window.PCDeluxe = (function () {
       tip.textContent = st.spectator ? '旁观中 · 等待玩家出牌' : (st.phase === 'idle' ? '点击「开局」开始' : '新一轮 · 请领出');
       table.appendChild(tip);
     }
-    // My hand
+    // My hand — observers see the ONE target's hand (read-only), players see own.
     hand.innerHTML = '';
-    if (!st.spectator && st.hand && st.hand.length) {
-      st.hand.forEach(function (c) {
-        hand.appendChild(cardEl(c, !!selected[c.id]));
+    var shown = st.spectator ? (st.targetHand || []) : (st.hand || []);
+    if (shown.length) {
+      shown.forEach(function (c) {
+        var card = cardEl(c, !st.spectator && !!selected[c.id]);
+        if (st.spectator) card.style.cursor = 'default';
+        hand.appendChild(card);
       });
     }
     // Level / turn / spectator note
     var lv = $('game-level'); if (lv) lv.textContent = '打 ' + game.rankName(st.level) + ' · 第 ' + (st.roundNo || 1) + ' 局';
     var note = $('spectator-note');
     if (note) {
-      if (st.spectatorInfo) { note.classList.remove('hidden'); note.textContent = '👁 唯一旁观席位已锁定：' + st.spectatorInfo.nickname; }
+      var texts = [];
+      if (st.spectator && st.watchTargetSid) {
+        var tn = (st.seats.filter(function (s) { return s.sid === st.watchTargetSid; })[0] || {}).nickname || '玩家';
+        texts.push('👁 你正在旁观：' + tn + ' 的手牌（只看这一人，不可更改）');
+      }
+      if (st.pendingForMe) {
+        texts.push('🔔 ' + (st.pendingForMe.spectatorNickname || '有人') + ' 请求旁观你的手牌');
+      }
+      if (texts.length) { note.classList.remove('hidden'); note.innerHTML = texts.join('<br>'); }
       else note.classList.add('hidden');
     }
+    // Consent buttons for a pending request targeting me.
+    renderConsent(st);
     var myTurn = !st.spectator && st.turn === ctx.state.mySid;
     var btnPlay = $('btn-game-play'), btnPass = $('btn-game-pass');
     if (btnPlay) btnPlay.disabled = !myTurn;
@@ -105,15 +118,64 @@ window.PCDeluxe = (function () {
     game.requestStart();
   }
 
+  /* Choose exactly ONE player to watch. Once locked by the server it cannot
+   * be changed, so show a clear pick-list with a confirm. */
   function requestSpectate() {
-    if (!ctx || !ctx.net) return;
-    ctx.net.send({ type: window.PCProtocol.MSG.GAME_SPECTATE, gameId: 'main' });
-    ctx.toast('已申请旁观席位（仅首位有效且不可更改）');
+    if (!game) return;
+    if (game.state.myRelation) {
+      ctx.toast('你已锁定旁观一名玩家，无法更改或旁观其他人');
+      return;
+    }
+    var cands = game.spectateCandidates();
+    if (!cands.length) { ctx.toast('当前没有其他可旁观的玩家'); return; }
+    var box = $('spectate-picker') || (function () {
+      var e = document.createElement('div'); e.id = 'spectate-picker';
+      e.className = 'spectate-picker hidden';
+      document.body.appendChild(e); return e;
+    })();
+    box.innerHTML = '';
+    var title = document.createElement('div'); title.className = 'pk-title';
+    title.textContent = '选择旁观对象（选定后不可更改，需对方同意）';
+    box.appendChild(title);
+    cands.forEach(function (c) {
+      var b = document.createElement('button'); b.className = 'tool-btn';
+      b.textContent = '👁 ' + c.nickname;
+      b.onclick = function () {
+        game.requestSpectate(c.sid);
+        box.classList.add('hidden');
+      };
+      box.appendChild(b);
+    });
+    var cancel = document.createElement('button'); cancel.className = 'tool-btn pk-cancel';
+    cancel.textContent = '取消';
+    cancel.onclick = function () { box.classList.add('hidden'); };
+    box.appendChild(cancel);
+    box.classList.remove('hidden');
   }
 
-  function onGameState(f) {
-    if (game) game.onMessage({ kind: 'spectator', spectator: f.spectator });
+  /* Draw consent buttons when someone asks to watch MY hand. */
+  function renderConsent(st) {
+    var panel = $('game-panel'); if (!panel) return;
+    var box = $('spectate-consent') || (function () {
+      var e = document.createElement('div'); e.id = 'spectate-consent';
+      e.className = 'spectate-consent hidden'; panel.appendChild(e); return e;
+    })();
+    box.innerHTML = '';
+    if (!st.pendingForMe) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    var q = document.createElement('div'); q.className = 'ask';
+    q.textContent = '🔔 ' + (st.pendingForMe.spectatorNickname || '有人') + ' 请求旁观你的手牌';
+    box.appendChild(q);
+    var yes = document.createElement('button'); yes.className = 'tool-btn'; yes.textContent = '同意';
+    yes.onclick = function () { game.replySpectate(st.pendingForMe.spectatorSid, true); };
+    var no = document.createElement('button'); no.className = 'tool-btn'; no.textContent = '拒绝';
+    no.onclick = function () { game.replySpectate(st.pendingForMe.spectatorSid, false); };
+    box.appendChild(yes); box.appendChild(no);
   }
+
+  function onGameState(f) { /* public turn/seat state already rendered via game.onUpdate */ }
+
+  function onSpectateState(f) { if (game) game.onMessage({ kind: 'spectate_state', spectate: f.spectate, self: f.self }); }
 
   /* --- full-duplex live voice: reuse WebRTC mesh, audio-only, always on --- */
   function toggleVoice() {
@@ -180,7 +242,7 @@ window.PCDeluxe = (function () {
   else wire();
 
   return {
-    bind: bind, onGameState: onGameState, renderGame: renderGame,
+    bind: bind, onGameState: onGameState, onSpectateState: onSpectateState, renderGame: renderGame,
     pipAddVideo: pipAddVideo, pipClear: pipClear,
     selectCard: function (id) { selected[id] = !selected[id]; },
     _selected: function () { return selected; }

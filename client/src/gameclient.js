@@ -7,7 +7,10 @@
  *
  * Roles: seat 0 (lowest sid) is the authoritative host for turn order; all
  * result validation also runs locally via PCGame so a peer cannot cheat on
- * card strength. The single spectator is locked server-side (GAME_SPECTATE).
+ * card strength. Spectating is ONE target per observer, consent-based, and
+ * arbitrated server-side (GAME_SPECTATE / _REPLY / _STATE): the server never
+ * sees cards. When a watch is approved, the host wraps that target's hand to
+ * the observer's ukPub inside the very same deal envelope.
  */
 window.PCGameClient = (function () {
   var P = window.PCProtocol;
@@ -17,6 +20,7 @@ window.PCGameClient = (function () {
     var config = ctx.config, mySid = ctx.mySid, uk = ctx.uk;
     var members = ctx.members;       // PCMembers module
     var sendGame = ctx.sendGame;      // (plaintextGameJson) => sendKind(json,'game')
+    var sendControl = ctx.sendControl || function () {}; // raw server control frames
     var toast = ctx.toast || function () {};
     var onUpdate = ctx.onUpdate || function () {};
 
@@ -33,11 +37,17 @@ window.PCGameClient = (function () {
       turn: null,
       finishOrder: [],
       roundNo: 0,
-      spectator: false,
-      spectatorInfo: null,
+      spectator: false,               // true once MY watch request is approved
+      spectate: [],                   // public spectator relations (all observers)
+      myRelation: null,               // my relation as an observer (pending|approved)
+      pendingForMe: null,             // a pending request where I am the target
+      watchTargetSid: null,          // the one player I am watching
+      targetHand: [],                // target's hand, decrypted for me as observer
       log: []
     };
 
+    // I am playing unless my own watch is approved. Being a watch target does
+    // not remove me from the game.
     function isHost() { return state.hostSid === mySid && !state.spectator; }
     function seatOfSid(sid) {
       for (var i = 0; i < state.seats.length; i++) if (state.seats[i].sid === sid) return i;
@@ -45,10 +55,13 @@ window.PCGameClient = (function () {
     }
     function note(text) { state.log.push(text); if (state.log.length > 40) state.log.shift(); onUpdate(state); }
 
-    /* Recompute seats from verified member list; lowest sid = host. */
+    /* Recompute seats from verified member list; lowest sid = host.
+     * An approved observer does not take a seat; being watched does not. */
     function syncSeats() {
       var all = members.all().slice().sort(function (a, b) { return a.sid.localeCompare(b.sid); });
-      var players = all.filter(function (m) { return !(state.spectatorInfo && state.spectatorInfo.sid === m.sid); });
+      var players = state.spectator
+        ? all.filter(function (m) { return m.sid !== mySid; })
+        : all;
       state.seats = players.slice(0, 4).map(function (m) {
         return { sid: m.sid, nickname: m.nickname, isMe: m.sid === mySid };
       });
@@ -76,8 +89,37 @@ window.PCGameClient = (function () {
           iv: enc.iv, ct: enc.ct, tag: enc.tag
         };
       }
+      // For every APPROVED watch, wrap that target's hand to the observer too,
+      // so the observer sees only the one player they were allowed to watch.
+      // The AAD binds round + target + observer, preventing cross-watch replay.
+      for (var w = 0; w < state.spectate.length; w++) {
+        var rel = state.spectate[w];
+        if (rel.status !== 'approved' || !rel.targetSid || !rel.spectatorSid) continue;
+        var tIdx = -1;
+        for (var q = 0; q < 4; q++) if (state.seats[q].sid === rel.targetSid) { tIdx = q; break; }
+        if (tIdx < 0) continue;
+        var obsMember = members.get(rel.spectatorSid);
+        if (!obsMember) continue;
+        var wK = window.PCCrypto.randomBytes(32);
+        var wPlain = JSON.stringify({ hand: hands[tIdx].map(function (c) { return { s: c.s, r: c.r, id: c.id }; }) });
+        var wEnc = window.PCCrypto.aesEncrypt(wK,
+          'deal|' + config.roomId + '|' + state.roundNo + '|' + rel.targetSid + '|' + rel.spectatorSid, wPlain);
+        wrapped[rel.spectatorSid] = {
+          wrap: window.PCCrypto.wrapKey(wK, obsMember.ukPub),
+          iv: wEnc.iv, ct: wEnc.ct, tag: wEnc.tag
+        };
+      }
       return { kind: 'deal', round: state.roundNo, level: state.level, hands: wrapped,
-        host: mySid, order: state.seats.map(function (s) { return s.sid; }) };
+        host: mySid, order: state.seats.map(function (s) { return s.sid; }),
+        watchTargetOf: (function () {
+          var m = {};
+          for (var z = 0; z < state.spectate.length; z++) {
+            var r = state.spectate[z];
+            if (r.status === 'approved') m[r.spectatorSid] = r.targetSid;
+          }
+          return m;
+        })()
+      };
     }
 
     async function onDeal(msg) {
@@ -88,7 +130,23 @@ window.PCGameClient = (function () {
       state.table = null; state.passes = 0; state.finishOrder = []; state.log = [];
       syncSeats();
       if (state.spectator) {
-        note('新一局开始（旁观）· 打' + rankName(state.level));
+        // Decrypt only the ONE hand I was approved to watch.
+        var watchedSid = (msg.watchTargetOf && msg.watchTargetOf[mySid]) || state.watchTargetSid;
+        var w = msg.hands && watchedSid && msg.hands[mySid];
+        state.targetHand = [];
+        if (w) {
+          try {
+            var wK = window.PCCrypto.unwrapKey(w.wrap, uk.privatePem);
+            var wPlain = window.PCCrypto.aesDecrypt(wK,
+              'deal|' + config.roomId + '|' + state.roundNo + '|' + watchedSid + '|' + mySid,
+              w.iv, w.ct, w.tag);
+            state.targetHand = window.PCGame.sortHand(JSON.parse(wPlain).hand, state.level);
+            var tn = (state.seats.filter(function (s) { return s.sid === watchedSid; })[0] || {}).nickname || '玩家';
+            note('旁观 ' + tn + ' 的手牌（' + state.targetHand.length + ' 张）· 打' + rankName(state.level));
+          } catch (e) { note('目标手牌解封失败：' + e.message); }
+        } else {
+          note('新一局开始（旁观等待中）· 打' + rankName(state.level));
+        }
         state.turn = msg.order && msg.order[0];
       } else if (msg.hands && msg.hands[mySid]) {
         var w = msg.hands[mySid];
@@ -231,9 +289,53 @@ window.PCGameClient = (function () {
         case 'pass': onPass(msg); break;
         case 'finished': onFinished(msg); break;
         case 'start': if (isHost()) startMatch(); break;
-        case 'spectator': state.spectatorInfo = msg.spectator; syncSeats(); onUpdate(state); break;
+        case 'spectate_state': applySpectateState(msg); break;
         default: break;
       }
+    }
+
+    /* Public relations + my own relation from the authoritative server. */
+    function applySpectateState(msg) {
+      state.spectate = msg.spectate || [];
+      state.myRelation = msg.self || null;
+      // My identity as observer: approved => I watch; pending => not yet.
+      var mine = null, pendingTarget = null;
+      for (var i = 0; i < state.spectate.length; i++) {
+        var r = state.spectate[i];
+        if (state.myRelation && r.spectatorSid === state.myRelation.spectatorSid) mine = r;
+        if (r.targetSid === mySid && r.status === 'pending') pendingTarget = r;
+      }
+      if (mine && mine.status === 'approved') {
+        state.spectator = true;
+        state.watchTargetSid = mine.targetSid;
+      } else {
+        state.spectator = false;
+        state.watchTargetSid = null;
+        state.targetHand = [];
+      }
+      state.pendingForMe = pendingTarget;
+      syncSeats();
+      onUpdate(state);
+    }
+
+    /* Observer requests to watch exactly one target (server enforces lock). */
+    function requestSpectate(targetSid) {
+      if (state.spectator || state.myRelation) {
+        toast('你已锁定旁观一名玩家，无法更改或旁观其他人');
+        return;
+      }
+      if (!targetSid || targetSid === mySid) { toast('请选择一名其他玩家'); return; }
+      sendControl({ type: P.MSG.GAME_SPECTATE, gameId: 'main', targetSid: targetSid });
+      toast('已提交旁观申请，等待对方同意');
+    }
+
+    /* The watched target answers a pending request. */
+    function replySpectate(spectatorSid, accept) {
+      if (!state.pendingForMe || state.pendingForMe.spectatorSid !== spectatorSid) {
+        toast('没有待处理的旁观申请'); return;
+      }
+      sendControl({ type: P.MSG.GAME_SPECTATE_REPLY, gameId: 'main',
+        spectatorSid: spectatorSid, accept: !!accept });
     }
 
     async function startMatch() {
@@ -256,7 +358,19 @@ window.PCGameClient = (function () {
     self.requestDeal = requestDeal;
     self.play = play;
     self.pass = pass;
-    self.setSpectator = function (info) { state.spectatorInfo = info; syncSeats(); onUpdate(state); };
+    self.requestSpectate = requestSpectate;
+    self.replySpectate = replySpectate;
+    self.spectateCandidates = function () {
+      var watched = {};
+      for (var i = 0; i < state.spectate.length; i++) watched[state.spectate[i].targetSid] = true;
+      return members.all().filter(function (m) {
+        return m.sid !== mySid && !watched[m.sid];
+      }).map(function (m) { return { sid: m.sid, nickname: m.nickname }; });
+    };
+    self.targetNickname = function (sid) {
+      var s = state.seats.filter(function (x) { return x.sid === sid; })[0];
+      return s ? s.nickname : '玩家';
+    };
     self.rankName = rankName;
     return self;
   }

@@ -241,6 +241,15 @@ const canonical = P.canonicalJSON;
     /PC3D[^\n]*\.init\(\)/.test(deluxe));
   check('游戏初始化判断使用 PCDeluxe.bind（非不存在的 init）',
     deluxe.indexOf('PCDeluxe && window.PCDeluxe.bind') !== -1);
+  // One-to-one consent spectator model guards.
+  check('旁观为一对一同意制（含目标选择与同意答复控制帧）',
+    deluxe.indexOf('GAME_SPECTATE_REPLY') !== -1 &&
+    deluxe.indexOf('spectateCandidates') !== -1 &&
+    deluxe.indexOf('targetSid') !== -1);
+  check('手牌选择器已改为 .pcard（不再覆盖登录 .card）',
+    deluxe.indexOf('.pcard{width:44px') !== -1 &&
+    deluxe.indexOf('.card{width:44px') === -1 &&
+    deluxe.indexOf("d.className = 'pcard'") !== -1);
   /* Guandan engine behaviour is covered by tools/test-guandan.js. */
 
   console.log('\n=== 结果: ' + passed + ' 通过 / ' + failed + ' 失败 ===');

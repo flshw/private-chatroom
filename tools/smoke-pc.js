@@ -63,7 +63,7 @@ function makeMember(label, cfg, uk) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(WS_URL);
     const m = { label, ws, uk, joined: false, sid: null, joinedFrame: null,
-      messages: [], errors: [], keyLists: [], gameStates: [] };
+      messages: [], errors: [], keyLists: [], gameStates: [], spectateStates: [] };
     const timer = setTimeout(() => { try { ws.close(); } catch (e) {} reject(new Error(label + ' JOIN 超时')); }, 10000);
     ws.on('open', async () => {
       try {
@@ -105,6 +105,8 @@ function makeMember(label, cfg, uk) {
         m.messages.push(f);
       } else if (f.type === P.MSG.GAME_STATE) {
         m.gameStates.push(f);
+      } else if (f.type === P.MSG.GAME_SPECTATE_STATE) {
+        m.spectateStates.push(f);
       } else if (f.type === P.MSG.ERROR) {
         m.errors.push(f.code);
       }
@@ -182,16 +184,33 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
     alice.keyLists.length >= 1 && alice.members.size === 2);
   check('成员名单 selfSig 逐条验签通过（A 侧）', alice.version >= 2);
 
-  /* single locked spectator: first claimant wins, second is rejected */
-  alice.ws.send(JSON.stringify({ type: P.MSG.GAME_SPECTATE, gameId: 'main' }));
+  /* one-to-one spectator: request ONE target -> target consent -> locked */
+  const lastSpec = () => alice.spectateStates.concat(bob.spectateStates).slice(-1)[0];
+  // A (阿明) asks to watch B (小雨).
+  alice.ws.send(JSON.stringify({ type: P.MSG.GAME_SPECTATE, gameId: 'main', targetSid: bob.sid }));
+  await new Promise(r => setTimeout(r, 180));
+  check('旁观申请以 pending 状态广播（含目标）',
+    lastSpec() && lastSpec().spectate.some(r => r.spectatorSid === alice.sid &&
+      r.targetSid === bob.sid && r.status === 'pending'));
+  // A cannot watch a second target once locked.
+  alice.ws.send(JSON.stringify({ type: P.MSG.GAME_SPECTATE, gameId: 'main', targetSid: alice.sid }));
   await new Promise(r => setTimeout(r, 150));
-  const locked = alice.gameStates.concat(bob.gameStates).some(f =>
-    f.spectator && f.spectator.nickname === '阿明' && f.locked === true);
-  check('首个申请者锁定唯一旁观席位并广播', locked);
-  bob.ws.send(JSON.stringify({ type: P.MSG.GAME_SPECTATE, gameId: 'main' }));
+  check('旁观者不能改选/旁观第二人（E_SPECTATOR_LIMIT 或目标无效）',
+    alice.errors.indexOf(P.ERR.SPECTATOR_LIMIT) !== -1 ||
+    alice.errors.indexOf(P.ERR.SPECTATE_TARGET_INVALID) !== -1);
+  // Non-target cannot approve: A tries to answer a request whose target is B.
+  alice.ws.send(JSON.stringify({ type: P.MSG.GAME_SPECTATE_REPLY, gameId: 'main',
+    spectatorSid: alice.sid, accept: true }));
   await new Promise(r => setTimeout(r, 150));
-  check('第二名旁观申请被拒绝（E_SPECTATOR_TAKEN）',
-    bob.errors.indexOf(P.ERR.SPECTATOR_TAKEN) !== -1);
+  check('非被旁观者无权答复（E_SPECTATE_NOT_TARGET）',
+    alice.errors.indexOf(P.ERR.SPECTATE_NOT_TARGET) !== -1);
+  // B (the watched target) approves.
+  bob.ws.send(JSON.stringify({ type: P.MSG.GAME_SPECTATE_REPLY, gameId: 'main',
+    spectatorSid: alice.sid, accept: true }));
+  await new Promise(r => setTimeout(r, 180));
+  check('目标同意后旁观关系变为 approved 并广播',
+    lastSpec() && lastSpec().spectate.some(r => r.spectatorSid === alice.sid &&
+      r.targetSid === bob.sid && r.status === 'approved'));
 
   /* encrypted message roundtrip: A -> B */
   const membersForA = Array.from(alice.members.values()).map(x => ({ sid: x.sid, ukPub: x.ukPub }));
@@ -219,9 +238,10 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
     const buf = fs.readFileSync(dbFile);
     return buf.indexOf(Buffer.from(plaintext)) === -1;
   })());
-  // The only expected server error so far is Bob's rejected second spectator claim.
-  check('合法消息未产生服务端 ERROR', alice.errors.length === 0 &&
-    bob.errors.filter(c => c !== P.ERR.SPECTATOR_TAKEN).length === 0);
+  // A's rejected second-target claim is an expected error from the spectator test.
+  check('合法消息未产生服务端 ERROR', alice.errors.filter(c =>
+    c !== P.ERR.SPECTATOR_LIMIT && c !== P.ERR.SPECTATE_TARGET_INVALID &&
+    c !== P.ERR.SPECTATE_NOT_TARGET).length === 0 && bob.errors.length === 0);
 
   /* replay rejected */
   alice.ws.send(JSON.stringify(frame)); // duplicate seq=1

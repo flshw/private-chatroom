@@ -35,7 +35,11 @@
     RTC_SIGNAL: 'rtc_signal',           // ↔    {to, encryptedSignal}
     GAME: 'game',                       // C→S  {gameId, round, action} — E2EE payload via msg kind='game'
     GAME_STATE: 'game_state',           // S→*  server-authoritative turn/seat state (public, no cards)
-    GAME_SPECTATE: 'game_spectate',     // C→S  {gameId} — request the single spectator seat
+    // One-to-one spectator model: each observer watches exactly ONE player's
+    // hand, is locked to that target, and needs the target's explicit consent.
+    GAME_SPECTATE: 'game_spectate',     // C→S  {gameId, targetSid} — request to watch one player
+    GAME_SPECTATE_REPLY: 'game_spectate_reply', // C→S  {gameId, spectatorSid, accept} — target answers
+    GAME_SPECTATE_STATE: 'game_spectate_state',  // S→*  public spectator relations (no cards)
     ROOM_EXPIRED: 'room_expired',       // S→C  {reason}
     ERROR: 'error',                     // S→C  {code, note?}
     PING: 'ping',
@@ -55,7 +59,11 @@
     BAD_VERSION: 'E_BAD_VERSION',
     BAD_ENVELOPE: 'E_BAD_ENVELOPE',
     NOT_AUTHENTICATED: 'E_NOT_AUTHENTICATED',
-    SPECTATOR_TAKEN: 'E_SPECTATOR_TAKEN',
+    SPECTATOR_TAKEN: 'E_SPECTATOR_TAKEN',        // kept for backward compat / legacy framing
+    SPECTATOR_LIMIT: 'E_SPECTATOR_LIMIT',        // observer already locked to a target (cannot change)
+    SPECTATE_TARGET_INVALID: 'E_SPECTATE_TARGET_INVALID', // target sid not in room / is self / already watched
+    SPECTATE_NOT_TARGET: 'E_SPECTATE_NOT_TARGET', // reply sender is not the watched target
+    SPECTATE_NO_REQUEST: 'E_SPECTATE_NO_REQUEST', // no pending request to answer
     EXPIRED: 'E_EXPIRED',
     INTERNAL: 'E_INTERNAL'
   };

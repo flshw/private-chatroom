@@ -152,7 +152,7 @@
       state.joined = true;
       state.seq = 0;
       enterChat();
-      if (game && f.spectator) game.onMessage({ kind: 'spectator', spectator: f.spectator });
+      if (game && f.spectate) game.onMessage({ kind: 'spectate_state', spectate: f.spectate });
       // Render history (ciphertext) that this member can decrypt.
       (f.history || []).forEach(renderEnvelope);
       updateMembersUI();
@@ -166,8 +166,10 @@
     } else if (f.type === PCProtocol.MSG.RTC_SIGNAL) {
       if (media) media.handleSignal(f.from, f.encryptedSignal);
     } else if (f.type === PCProtocol.MSG.GAME_STATE) {
-      if (game) game.onMessage({ kind: 'spectator', spectator: f.spectator });
       if (window.PCDeluxe && window.PCDeluxe.onGameState) window.PCDeluxe.onGameState(f);
+    } else if (f.type === PCProtocol.MSG.GAME_SPECTATE_STATE) {
+      if (game) game.onMessage({ kind: 'spectate_state', spectate: f.spectate, self: f.self });
+      if (window.PCDeluxe && window.PCDeluxe.onSpectateState) window.PCDeluxe.onSpectateState(f);
     } else if (f.type === PCProtocol.MSG.ROOM_EXPIRED) {
       handleExpiry();
     } else if (f.type === PCProtocol.MSG.ERROR) {
@@ -307,6 +309,7 @@
       game = window.PCGameClient.create({
         config: state.config, mySid: state.mySid, uk: state.uk, members: PCMembers,
         sendGame: function (obj) { return sendKind(JSON.stringify(obj), 'game'); },
+        sendControl: function (frame) { if (net) net.send(frame); },
         toast: toast,
         onUpdate: function (st) { if (window.PCDeluxe.renderGame) window.PCDeluxe.renderGame(st, game); }
       });

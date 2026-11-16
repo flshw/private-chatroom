@@ -183,7 +183,11 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     RTC_SIGNAL: 'rtc_signal',           // ↔    {to, encryptedSignal}
     GAME: 'game',                       // C→S  {gameId, round, action} — E2EE payload via msg kind='game'
     GAME_STATE: 'game_state',           // S→*  server-authoritative turn/seat state (public, no cards)
-    GAME_SPECTATE: 'game_spectate',     // C→S  {gameId} — request the single spectator seat
+    // One-to-one spectator model: each observer watches exactly ONE player's
+    // hand, is locked to that target, and needs the target's explicit consent.
+    GAME_SPECTATE: 'game_spectate',     // C→S  {gameId, targetSid} — request to watch one player
+    GAME_SPECTATE_REPLY: 'game_spectate_reply', // C→S  {gameId, spectatorSid, accept} — target answers
+    GAME_SPECTATE_STATE: 'game_spectate_state',  // S→*  public spectator relations (no cards)
     ROOM_EXPIRED: 'room_expired',       // S→C  {reason}
     ERROR: 'error',                     // S→C  {code, note?}
     PING: 'ping',
@@ -203,7 +207,11 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     BAD_VERSION: 'E_BAD_VERSION',
     BAD_ENVELOPE: 'E_BAD_ENVELOPE',
     NOT_AUTHENTICATED: 'E_NOT_AUTHENTICATED',
-    SPECTATOR_TAKEN: 'E_SPECTATOR_TAKEN',
+    SPECTATOR_TAKEN: 'E_SPECTATOR_TAKEN',        // kept for backward compat / legacy framing
+    SPECTATOR_LIMIT: 'E_SPECTATOR_LIMIT',        // observer already locked to a target (cannot change)
+    SPECTATE_TARGET_INVALID: 'E_SPECTATE_TARGET_INVALID', // target sid not in room / is self / already watched
+    SPECTATE_NOT_TARGET: 'E_SPECTATE_NOT_TARGET', // reply sender is not the watched target
+    SPECTATE_NO_REQUEST: 'E_SPECTATE_NO_REQUEST', // no pending request to answer
     EXPIRED: 'E_EXPIRED',
     INTERNAL: 'E_INTERNAL'
   };
@@ -1072,7 +1080,7 @@ window.PCMedia = function (ctx) {
       state.joined = true;
       state.seq = 0;
       enterChat();
-      if (game && f.spectator) game.onMessage({ kind: 'spectator', spectator: f.spectator });
+      if (game && f.spectate) game.onMessage({ kind: 'spectate_state', spectate: f.spectate });
       // Render history (ciphertext) that this member can decrypt.
       (f.history || []).forEach(renderEnvelope);
       updateMembersUI();
@@ -1086,8 +1094,10 @@ window.PCMedia = function (ctx) {
     } else if (f.type === PCProtocol.MSG.RTC_SIGNAL) {
       if (media) media.handleSignal(f.from, f.encryptedSignal);
     } else if (f.type === PCProtocol.MSG.GAME_STATE) {
-      if (game) game.onMessage({ kind: 'spectator', spectator: f.spectator });
       if (window.PCDeluxe && window.PCDeluxe.onGameState) window.PCDeluxe.onGameState(f);
+    } else if (f.type === PCProtocol.MSG.GAME_SPECTATE_STATE) {
+      if (game) game.onMessage({ kind: 'spectate_state', spectate: f.spectate, self: f.self });
+      if (window.PCDeluxe && window.PCDeluxe.onSpectateState) window.PCDeluxe.onSpectateState(f);
     } else if (f.type === PCProtocol.MSG.ROOM_EXPIRED) {
       handleExpiry();
     } else if (f.type === PCProtocol.MSG.ERROR) {
@@ -1227,6 +1237,7 @@ window.PCMedia = function (ctx) {
       game = window.PCGameClient.create({
         config: state.config, mySid: state.mySid, uk: state.uk, members: PCMembers,
         sendGame: function (obj) { return sendKind(JSON.stringify(obj), 'game'); },
+        sendControl: function (frame) { if (net) net.send(frame); },
         toast: toast,
         onUpdate: function (st) { if (window.PCDeluxe.renderGame) window.PCDeluxe.renderGame(st, game); }
       });

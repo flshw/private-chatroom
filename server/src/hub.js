@@ -30,10 +30,12 @@ class Hub {
     this.byRoom = new Map();      // roomId -> Map<sid, session>
     this.memberVersion = new Map(); // roomId -> integer, monotonic
     this.rate = new Map();        // sid -> {count, windowAt}
-    /* Single locked spectator seat per room. Keyed by ukPub (stable across
-     * reconnects) so the seat can never be swapped or stolen. First claim wins
-     * for the lifetime of the room. */
-    this.spectators = new Map();  // roomId -> {ukPub, sid, nickname, claimedAt}
+    /* One-to-one spectator relations. Each observer (keyed by ukPub, stable
+     * across reconnects) watches exactly ONE target player and needs that
+     * target's consent. Once created the target is locked for the room's
+     * lifetime — the observer cannot switch or add another target. The server
+     * only arbitrates identity/consent; it never sees any cards. */
+    this.spectators = new Map();  // roomId -> Map<spectatorUkPub, relation>
   }
 
   attach(session) {
@@ -123,6 +125,7 @@ class Hub {
     if (frame.type === P.MSG.MSG) return this.onMessage(session, frame);
     if (frame.type === P.MSG.RTC_SIGNAL) return this.onRtc(session, frame);
     if (frame.type === P.MSG.GAME_SPECTATE) return this.onSpectate(session, frame);
+    if (frame.type === P.MSG.GAME_SPECTATE_REPLY) return this.onSpectateReply(session, frame);
     return this.error(session, P.ERR.BAD_ENVELOPE);
   }
 
@@ -185,7 +188,7 @@ class Hub {
       type: P.MSG.JOINED,
       sessionId: sid, serverTime: now, expiresAt: room.expires_at,
       memberList: list, memberListSig: sig, history,
-      spectator: this.spectators.get(roomId) || null
+      spectate: this.publicSpectators(roomId)
     });
     this.broadcastMemberKeys(roomId);
   }
@@ -277,40 +280,121 @@ class Hub {
     });
   }
 
-  /* Single spectator seat. First claimant is locked for the room's lifetime,
-   * identified by ukPub so a reconnect (new sid) never loses or steals it.
-   * The server never sees cards — it only arbitrates this one public role. */
+  /* --- One-to-one spectator relations (consent required, target locked) ---
+   * An observer requests to watch ONE specific player (targetSid). The target
+   * must explicitly accept. Once a relation exists for an observer (keyed by
+   * ukPub) its target is locked for the room's lifetime: no switching, no
+   * second target. Reconnect (new sid) with the same ukPub restores the same
+   * relation. The server arbitrates identity + consent only; never cards. */
+  spectateMap(roomId) {
+    if (!this.spectators.has(roomId)) this.spectators.set(roomId, new Map());
+    return this.spectators.get(roomId);
+  }
+
   onSpectate(session, frame) {
     if (!session.joined) return this.error(session, P.ERR.NOT_AUTHENTICATED);
     const roomId = session.roomId;
     const gameId = String(frame.gameId || 'main').slice(0, 32);
-    const existing = this.spectators.get(roomId);
-    if (existing) {
-      // Same identity reclaiming after reconnect: refresh sid, keep seat.
-      if (existing.ukPub === session.ukPub) {
-        existing.sid = session.sid;
-        session.spectator = true;
-        session.send({ type: P.MSG.GAME_STATE, gameId, spectator: this.publicSpectator(existing) });
+    const targetSid = String(frame.targetSid || '');
+    const room = this.byRoom.get(roomId);
+    if (!room) return this.error(session, P.ERR.SPECTATE_TARGET_INVALID);
+    const map = this.spectateMap(roomId);
+
+    // Existing relation for this observer: locked to its target. A reconnect
+    // (no/equal targetSid) refreshes the sid; naming a DIFFERENT target is a
+    // forbidden switch and must be rejected.
+    for (const rel of map.values()) {
+      if (rel.spectatorUkPub === session.ukPub) {
+        if (targetSid && targetSid !== rel.targetSid) {
+          return this.error(session, P.ERR.SPECTATOR_LIMIT);
+        }
+        rel.spectatorSid = session.sid;      // reconnect keeps the same locked target
+        if (rel.status === 'approved') session.spectator = true;
+        session.send({ type: P.MSG.GAME_SPECTATE_STATE, gameId,
+          spectate: this.publicSpectators(roomId), self: this.publicRelation(rel) });
         return;
       }
-      return this.error(session, P.ERR.SPECTATOR_TAKEN);
     }
-    const rec = {
-      ukPub: session.ukPub, sid: session.sid,
-      nickname: session.nickname, claimedAt: Date.now(), gameId
+    // Already watching someone (as the target of another? no) — observers are
+    // limited to one relation. A player who is themselves being watched may
+    // still observe another only if they have no relation as observer.
+    if (targetSid === session.sid || !room.has(targetSid)) {
+      return this.error(session, P.ERR.SPECTATE_TARGET_INVALID);
+    }
+    // Target must not already be watched by a different observer (one target ->
+    // at most one watcher keeps the "cannot be replaced" property simple).
+    for (const rel of map.values()) {
+      if (rel.targetSid === targetSid) return this.error(session, P.ERR.SPECTATE_TARGET_INVALID);
+    }
+    const target = room.get(targetSid);
+    const rel = {
+      spectatorUkPub: session.ukPub, spectatorSid: session.sid,
+      spectatorNickname: session.nickname,
+      targetSid, targetUkPub: target.ukPub, targetNickname: target.nickname,
+      status: 'pending', createdAt: Date.now(), gameId
     };
-    this.spectators.set(roomId, rec);
-    session.spectator = true;
-    this.db.audit('spectator_locked', roomId, Date.now());
-    this.logger('旁观席位锁定: ' + roomId + ' <- ' + session.nickname);
-    const state = { type: P.MSG.GAME_STATE, gameId, spectator: this.publicSpectator(rec), locked: true };
-    const room = this.byRoom.get(roomId);
-    if (room) for (const s of room.values()) s.send(state);
+    map.set(session.ukPub, rel);
+    this.db.audit('spectate_request', roomId, Date.now());
+    this.logger('旁观申请: ' + session.nickname + ' -> ' + target.nickname + ' (待同意)');
+    this.broadcastSpectate(roomId, gameId);
   }
 
-  publicSpectator(rec) {
-    if (!rec) return null;
-    return { sid: rec.sid, nickname: rec.nickname, claimedAt: rec.claimedAt, gameId: rec.gameId };
+  onSpectateReply(session, frame) {
+    if (!session.joined) return this.error(session, P.ERR.NOT_AUTHENTICATED);
+    const roomId = session.roomId;
+    const gameId = String(frame.gameId || 'main').slice(0, 32);
+    const spectatorSid = String(frame.spectatorSid || '');
+    const accept = frame.accept === true;
+    const map = this.spectators.get(roomId);
+    if (!map) return this.error(session, P.ERR.SPECTATE_NO_REQUEST);
+    let found = null;
+    for (const rel of map.values()) if (rel.spectatorSid === spectatorSid) { found = rel; break; }
+    if (!found || found.status !== 'pending') return this.error(session, P.ERR.SPECTATE_NO_REQUEST);
+    // Only the watched target may answer (matched by ukPub, stable on reconnect).
+    if (found.targetUkPub !== session.ukPub) return this.error(session, P.ERR.SPECTATE_NOT_TARGET);
+    if (!accept) {
+      map.delete(found.spectatorUkPub); // declined: observer may request another target
+      this.db.audit('spectate_declined', roomId, Date.now());
+      this.logger('旁观被拒: ' + found.targetNickname + ' 拒绝 ' + found.spectatorNickname);
+      const obs = this.byRoom.get(roomId) && this.byRoom.get(roomId).get(found.spectatorSid);
+      if (obs) obs.send({ type: P.MSG.ERROR, code: 'E_SPECTATE_DECLINED' });
+    } else {
+      found.status = 'approved';
+      found.approvedAt = Date.now();
+      const obs = this.byRoom.get(roomId) && this.byRoom.get(roomId).get(found.spectatorSid);
+      if (obs) obs.spectator = true;
+      this.db.audit('spectate_approved', roomId, Date.now());
+      this.logger('旁观已同意: ' + found.targetNickname + ' 允许 ' + found.spectatorNickname);
+    }
+    this.broadcastSpectate(roomId, gameId);
+  }
+
+  broadcastSpectate(roomId, gameId) {
+    const room = this.byRoom.get(roomId);
+    if (!room) return;
+    const frame = { type: P.MSG.GAME_SPECTATE_STATE, gameId, spectate: this.publicSpectators(roomId) };
+    for (const s of room.values()) s.send(frame);
+    // Also tell each observer its own relation (incl. pending target / self flag).
+    for (const rel of this.spectateMap(roomId).values()) {
+      const obs = room.get(rel.spectatorSid);
+      if (obs) obs.send({ type: P.MSG.GAME_SPECTATE_STATE, gameId,
+        spectate: this.publicSpectators(roomId), self: this.publicRelation(rel) });
+    }
+  }
+
+  publicSpectators(roomId) {
+    const map = this.spectators.get(roomId);
+    if (!map) return [];
+    return Array.from(map.values()).map(rel => this.publicRelation(rel));
+  }
+
+  publicRelation(rel) {
+    return {
+      spectatorSid: rel.spectatorSid, spectatorNickname: rel.spectatorNickname,
+      targetSid: rel.targetSid, targetNickname: rel.targetNickname,
+      status: rel.status, gameId: rel.gameId,
+      claimedAt: rel.claimedAt, approvedAt: rel.approvedAt || null
+    };
   }
 
   onlineCount(roomId) {
