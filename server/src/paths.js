@@ -11,6 +11,7 @@ const ROOT = path.resolve(__dirname, '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const ADMIN_DIR = path.join(ROOT, 'admin');
 const TEMPLATE_FILE = path.join(ROOT, '..', 'client', 'dist', 'private-chat.template.html');
+const DELUXE_TEMPLATE_FILE = path.join(ROOT, '..', 'client', 'dist', 'private-chat-deluxe.template.html');
 
 function envInt(name, fallback) {
   const n = parseInt(process.env[name] || '', 10);
@@ -36,6 +37,6 @@ const config = {
 };
 
 module.exports = {
-  ROOT, PUBLIC_DIR, ADMIN_DIR, TEMPLATE_FILE,
+  ROOT, PUBLIC_DIR, ADMIN_DIR, TEMPLATE_FILE, DELUXE_TEMPLATE_FILE,
   DATA_DIR, KEYS_DIR, LOG_DIR, FILES_DIR, config
 };

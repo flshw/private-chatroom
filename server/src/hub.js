@@ -30,6 +30,10 @@ class Hub {
     this.byRoom = new Map();      // roomId -> Map<sid, session>
     this.memberVersion = new Map(); // roomId -> integer, monotonic
     this.rate = new Map();        // sid -> {count, windowAt}
+    /* Single locked spectator seat per room. Keyed by ukPub (stable across
+     * reconnects) so the seat can never be swapped or stolen. First claim wins
+     * for the lifetime of the room. */
+    this.spectators = new Map();  // roomId -> {ukPub, sid, nickname, claimedAt}
   }
 
   attach(session) {
@@ -55,7 +59,11 @@ class Hub {
     return this.byRoom.get(roomId);
   }
 
-  clearRoom(roomId) { this.byRoom.delete(roomId); this.memberVersion.delete(roomId); }
+  clearRoom(roomId) {
+    this.byRoom.delete(roomId);
+    this.memberVersion.delete(roomId);
+    this.spectators.delete(roomId);
+  }
 
   kickAll(roomId, reason) {
     const room = this.byRoom.get(roomId);
@@ -114,6 +122,7 @@ class Hub {
     if (!session.joined) return this.error(session, P.ERR.NOT_AUTHENTICATED);
     if (frame.type === P.MSG.MSG) return this.onMessage(session, frame);
     if (frame.type === P.MSG.RTC_SIGNAL) return this.onRtc(session, frame);
+    if (frame.type === P.MSG.GAME_SPECTATE) return this.onSpectate(session, frame);
     return this.error(session, P.ERR.BAD_ENVELOPE);
   }
 
@@ -175,7 +184,8 @@ class Hub {
     session.send({
       type: P.MSG.JOINED,
       sessionId: sid, serverTime: now, expiresAt: room.expires_at,
-      memberList: list, memberListSig: sig, history
+      memberList: list, memberListSig: sig, history,
+      spectator: this.spectators.get(roomId) || null
     });
     this.broadcastMemberKeys(roomId);
   }
@@ -265,6 +275,42 @@ class Hub {
       type: P.MSG.RTC_SIGNAL, from: session.sid,
       encryptedSignal: String(f.encryptedSignal || '').slice(0, P.LIMITS.MAX_FRAME_BYTES)
     });
+  }
+
+  /* Single spectator seat. First claimant is locked for the room's lifetime,
+   * identified by ukPub so a reconnect (new sid) never loses or steals it.
+   * The server never sees cards — it only arbitrates this one public role. */
+  onSpectate(session, frame) {
+    if (!session.joined) return this.error(session, P.ERR.NOT_AUTHENTICATED);
+    const roomId = session.roomId;
+    const gameId = String(frame.gameId || 'main').slice(0, 32);
+    const existing = this.spectators.get(roomId);
+    if (existing) {
+      // Same identity reclaiming after reconnect: refresh sid, keep seat.
+      if (existing.ukPub === session.ukPub) {
+        existing.sid = session.sid;
+        session.spectator = true;
+        session.send({ type: P.MSG.GAME_STATE, gameId, spectator: this.publicSpectator(existing) });
+        return;
+      }
+      return this.error(session, P.ERR.SPECTATOR_TAKEN);
+    }
+    const rec = {
+      ukPub: session.ukPub, sid: session.sid,
+      nickname: session.nickname, claimedAt: Date.now(), gameId
+    };
+    this.spectators.set(roomId, rec);
+    session.spectator = true;
+    this.db.audit('spectator_locked', roomId, Date.now());
+    this.logger('旁观席位锁定: ' + roomId + ' <- ' + session.nickname);
+    const state = { type: P.MSG.GAME_STATE, gameId, spectator: this.publicSpectator(rec), locked: true };
+    const room = this.byRoom.get(roomId);
+    if (room) for (const s of room.values()) s.send(state);
+  }
+
+  publicSpectator(rec) {
+    if (!rec) return null;
+    return { sid: rec.sid, nickname: rec.nickname, claimedAt: rec.claimedAt, gameId: rec.gameId };
   }
 
   onlineCount(roomId) {

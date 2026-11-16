@@ -181,6 +181,9 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     MSG: 'msg',                         // C→S  {envelope, sig, senderPub}
     MSG_BROADCAST: 'msg_broadcast',     // S→*  above + fromSession
     RTC_SIGNAL: 'rtc_signal',           // ↔    {to, encryptedSignal}
+    GAME: 'game',                       // C→S  {gameId, round, action} — E2EE payload via msg kind='game'
+    GAME_STATE: 'game_state',           // S→*  server-authoritative turn/seat state (public, no cards)
+    GAME_SPECTATE: 'game_spectate',     // C→S  {gameId} — request the single spectator seat
     ROOM_EXPIRED: 'room_expired',       // S→C  {reason}
     ERROR: 'error',                     // S→C  {code, note?}
     PING: 'ping',
@@ -200,6 +203,7 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     BAD_VERSION: 'E_BAD_VERSION',
     BAD_ENVELOPE: 'E_BAD_ENVELOPE',
     NOT_AUTHENTICATED: 'E_NOT_AUTHENTICATED',
+    SPECTATOR_TAKEN: 'E_SPECTATOR_TAKEN',
     EXPIRED: 'E_EXPIRED',
     INTERNAL: 'E_INTERNAL'
   };
@@ -855,12 +859,13 @@ window.PCMedia = function (ctx) {
     return pc;
   }
 
-  this.startCall = async function () {
+  this.startCall = async function (voiceOnly) {
     if (inCall) return;
     if (!navigator.mediaDevices || !window.RTCPeerConnection) {
-      ctx.toast('当前环境不支持视频通话，请使用在线入口'); return;
+      ctx.toast('当前环境不支持实时通话，请使用在线入口'); return;
     }
-    try { localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }); }
+    var constraints = voiceOnly ? { video: false, audio: true } : { video: true, audio: true };
+    try { localStream = await navigator.mediaDevices.getUserMedia(constraints); }
     catch (e) { ctx.toast('无法访问摄像头/麦克风，请使用在线 HTTPS 入口'); return; }
     inCall = true;
     ctx.onLocalStream(localStream);
@@ -925,7 +930,7 @@ window.PCMedia = function (ctx) {
     config: null, offsetMs: 0, uk: null, mySid: null,
     seq: 0, serverTs: 0, joined: false, messages: [], expired: false
   };
-  var net = null, media = null, countdown = null;
+  var net = null, media = null, countdown = null, game = null;
 
   function show(id) {
     ['boot', 'gate', 'chat'].forEach(function (x) { $(x).classList.toggle('hidden', x !== id); });
@@ -1067,6 +1072,7 @@ window.PCMedia = function (ctx) {
       state.joined = true;
       state.seq = 0;
       enterChat();
+      if (game && f.spectator) game.onMessage({ kind: 'spectator', spectator: f.spectator });
       // Render history (ciphertext) that this member can decrypt.
       (f.history || []).forEach(renderEnvelope);
       updateMembersUI();
@@ -1079,6 +1085,9 @@ window.PCMedia = function (ctx) {
       renderEnvelope(f.envelope, f.sig, f.senderPub);
     } else if (f.type === PCProtocol.MSG.RTC_SIGNAL) {
       if (media) media.handleSignal(f.from, f.encryptedSignal);
+    } else if (f.type === PCProtocol.MSG.GAME_STATE) {
+      if (game) game.onMessage({ kind: 'spectator', spectator: f.spectator });
+      if (window.PCDeluxe && window.PCDeluxe.onGameState) window.PCDeluxe.onGameState(f);
     } else if (f.type === PCProtocol.MSG.ROOM_EXPIRED) {
       handleExpiry();
     } else if (f.type === PCProtocol.MSG.ERROR) {
@@ -1117,6 +1126,12 @@ window.PCMedia = function (ctx) {
     } catch (e) {
       if (e.message === '本条消息未向我封装') return; // not addressed to me (e.g., late joiner history)
       text = '[无法解密的消息：' + e.message + ']';
+    }
+    // Game payloads ride the same E2EE channel but are routed to the game
+    // engine instead of the chat transcript (deluxe edition only).
+    if (env.kind === 'game') {
+      try { if (game) game.onMessage(JSON.parse(text)); } catch (e) { /* ignore malformed game frame */ }
+      return;
     }
     var mine = env.senderSid === state.mySid;
     state.messages.push({
@@ -1170,7 +1185,7 @@ window.PCMedia = function (ctx) {
       row.appendChild(name); row.appendChild(badge);
       list.appendChild(row);
     });
-    PCMembers.safetyCode().then(function (c) { $('safety-code').textContent = '安全码 ' + c; });
+    try { $('safety-code').textContent = '安全码 ' + PCMembers.safetyCode(); } catch (e) {}
   }
 
   async function sendText() {
@@ -1207,6 +1222,17 @@ window.PCMedia = function (ctx) {
       onLocalStream: onLocalStream,
       onCallEnd: onCallEnd
     });
+    // Deluxe edition: initialise Guandan engine + UI. Simple edition is a no-op.
+    if (window.PCGameClient && window.PCDeluxe && window.PCDeluxe.bind) {
+      game = window.PCGameClient.create({
+        config: state.config, mySid: state.mySid, uk: state.uk, members: PCMembers,
+        sendGame: function (obj) { return sendKind(JSON.stringify(obj), 'game'); },
+        toast: toast,
+        onUpdate: function (st) { if (window.PCDeluxe.renderGame) window.PCDeluxe.renderGame(st, game); }
+      });
+      window.PCDeluxe.bind({ game: game, app: { net: net, media: media, state: state,
+        sendKind: sendKind, toast: toast } });
+    }
   }
 
   function startCountdown(expiresAt) {
@@ -1232,7 +1258,9 @@ window.PCMedia = function (ctx) {
     clearUK(state.config.roomId).then(function () { /* local plaintext cleared */ });
   }
 
+  function isDeluxe() { return !!(window.PCDeluxe && window.PCDeluxe.pipAddVideo); }
   function onLocalStream(stream) {
+    if (isDeluxe()) { window.PCDeluxe.pipAddVideo('video-local', stream, true); return; }
     var grid = $('video-grid');
     grid.innerHTML = '';
     var v = document.createElement('video');
@@ -1241,13 +1269,17 @@ window.PCMedia = function (ctx) {
     $('video-overlay').classList.remove('hidden');
   }
   function onRemoteTrack(sid, stream) {
+    if (isDeluxe()) { window.PCDeluxe.pipAddVideo('video-' + sid, stream, false); return; }
     var grid = $('video-grid');
     var v = document.createElement('video');
     v.id = 'video-' + sid; v.srcObject = stream; v.autoplay = true; v.playsInline = true;
     grid.appendChild(v);
     $('video-overlay').classList.remove('hidden');
   }
-  function onCallEnd() { $('video-overlay').classList.add('hidden'); $('video-grid').innerHTML = ''; }
+  function onCallEnd() {
+    if (isDeluxe()) { window.PCDeluxe.pipClear(); return; }
+    $('video-overlay').classList.add('hidden'); $('video-grid').innerHTML = '';
+  }
 
   /* --- wire events --- */
   $('btn-enter').addEventListener('click', enter);

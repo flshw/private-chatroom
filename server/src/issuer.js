@@ -14,7 +14,7 @@
 const fs = require('fs');
 const nodeCrypto = require('crypto');
 const P = require('./protocol');
-const { TEMPLATE_FILE, config } = require('./paths');
+const { TEMPLATE_FILE, DELUXE_TEMPLATE_FILE, config } = require('./paths');
 
 function safeJs(s) { return String(s).replace(/<\/script/gi, '<\\/script'); }
 
@@ -31,26 +31,32 @@ class Issuer {
     this.keys = keyStore;
     this.canonical = canonicalJSON;
     this.logger = logger || (() => {});
-    this.template = null;
+    this.templates = {}; // edition -> html
   }
 
-  loadTemplate() {
-    if (!fs.existsSync(TEMPLATE_FILE)) {
-      throw new Error('客户端模板不存在，请先运行 node tools/build-client.js');
+  loadTemplate(edition) {
+    edition = edition === 'deluxe' ? 'deluxe' : 'lite';
+    if (!this.templates[edition]) {
+      const file = edition === 'deluxe' ? DELUXE_TEMPLATE_FILE : TEMPLATE_FILE;
+      if (!fs.existsSync(file)) {
+        throw new Error('客户端模板不存在，请先运行 node tools/build-client.js');
+      }
+      const tpl = fs.readFileSync(file, 'utf8');
+      if (tpl.indexOf('__PC_CONFIG__') === -1) {
+        throw new Error('客户端模板缺少 __PC_CONFIG__ 占位符');
+      }
+      this.templates[edition] = tpl;
     }
-    this.template = fs.readFileSync(TEMPLATE_FILE, 'utf8');
-    if (this.template.indexOf('__PC_CONFIG__') === -1) {
-      throw new Error('客户端模板缺少 __PC_CONFIG__ 占位符');
-    }
-    return this;
+    return this.templates[edition];
   }
 
   /* Build the signed config block for a room and bake a one-shot HTML string.
    * Returns { html, filename, config, configSig, configDigest, joinToken,
    *           roomPubKey, roomPrivRef }.
    * Caller decides whether to persist room metadata (issue vs reissue). */
-  build(roomMeta, serverSecret) {
-    if (!this.template) this.loadTemplate();
+  build(roomMeta, serverSecret, edition) {
+    const template = this.loadTemplate(edition);
+    const isDeluxe = edition === 'deluxe';
     const roomId = roomMeta.roomId;
     const joinToken = nodeCrypto.randomBytes(P.LIMITS.TOKEN_BYTES).toString('hex');
     const rk = this.keys.createRoomKey(roomId);
@@ -67,7 +73,8 @@ class Issuer {
       issuedAt: roomMeta.issuedAt,
       expiresAt: roomMeta.expiresAt,
       maxMembers: roomMeta.maxMembers,
-      clientVersion: P.PC_RELEASE_VERSION
+      clientVersion: P.PC_RELEASE_VERSION,
+      edition: isDeluxe ? 'deluxe' : 'lite'
     };
     const sig = this.keys.signConfig(configObj, this.canonical);
     const digest = nodeCrypto.createHash('sha256')
@@ -75,9 +82,10 @@ class Issuer {
     const injected =
       'window.__PC_CONFIG__=' + JSON.stringify(configObj) + ';' +
       'window.__PC_CONFIG_SIG__=' + JSON.stringify(sig) + ';';
-    const html = this.template.replace('/*__PC_CONFIG__*/', () => safeJs(injected));
+    const html = template.replace('/*__PC_CONFIG__*/', () => safeJs(injected));
     if (html.indexOf('/*__PC_CONFIG__*/') !== -1) throw new Error('配置块注入失败');
-    const filename = 'private-chat-' + cleanFilename(roomMeta.name) + '-' + roomId.slice(0, 8) + '.html';
+    const filename = 'private-chat-' + cleanFilename(roomMeta.name) + '-' + roomId.slice(0, 8) +
+      (isDeluxe ? '-deluxe' : '') + '.html';
     return {
       html, filename, config: configObj, configSig: sig, configDigest: digest,
       joinToken, joinTokenHash: this.keys.tokenHash(serverSecret, joinToken),

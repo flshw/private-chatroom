@@ -196,7 +196,8 @@ function createHttpServer(options) {
       const user = requireUser();
       if (!user) return sendJson(res, 401, { ok: false, error: '需要登录' });
       try {
-        const built = rooms.issueClient(user, m[1]);
+        const edition = url.searchParams.get('edition') === 'deluxe' ? 'deluxe' : 'lite';
+        const built = rooms.issueClient(user, m[1], edition);
         res.writeHead(200, Object.assign({
           'Content-Type': 'text/html; charset=utf-8',
           'Content-Disposition': 'attachment; filename="' + built.filename + '"',

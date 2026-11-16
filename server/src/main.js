@@ -36,7 +36,7 @@ async function boot() {
   await db.init();
   const keys = new KeyStore(logger).init();
   const accounts = new Accounts(db, logger);
-  const issuer = new Issuer(db, keys, P.canonicalJSON, logger).loadTemplate();
+  const issuer = new Issuer(db, keys, P.canonicalJSON, logger);
   const hub = new Hub({ db, keys, canonicalJSON: P.canonicalJSON, logger, serverSecret: keys.serverSecret() });
   const rooms = new Rooms(db, keys, issuer, accounts, hub, logger);
   hub.rooms = rooms;

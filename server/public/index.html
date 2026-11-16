@@ -30,6 +30,7 @@ button:disabled{opacity:.5;cursor:default}
 .room-item .grow{flex:1;min-width:0}.room-item .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .room-item .meta{color:var(--muted);font-size:11px;margin-top:3px}
 .room-item a{font-size:12px;color:var(--brand);text-decoration:none;padding:6px 9px;border:1px solid var(--line);border-radius:8px;white-space:nowrap}
+.room-item .dlwrap{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
 .room-item .destroy{font-size:12px;color:var(--danger);background:transparent;border:1px solid var(--danger);border-radius:8px;padding:6px 9px;white-space:nowrap;cursor:pointer}
 .hint{font-size:11.5px;color:var(--muted);line-height:1.6;margin-top:8px}
 .foot{text-align:center;color:#93a0bd;font-size:11px;margin-top:18px}
@@ -68,9 +69,10 @@ button:disabled{opacity:.5;cursor:default}
       <div><label>生命期</label><select id="r-ttl"><option value="3600">1 小时</option><option value="28800">8 小时</option><option value="43200">12 小时</option><option value="86400" selected>24 小时</option><option value="172800">48 小时</option><option value="259200">72 小时</option></select></div>
       <div><label>人数上限</label><select id="r-max"><option value="2">2 人</option><option value="4">4 人</option><option value="6" selected>6 人</option><option value="10">10 人</option><option value="20">20 人</option></select></div>
     </div>
+    <div><label>客户端版本</label><select id="r-edition"><option value="lite" selected>简洁版 · 轻量快速</option><option value="deluxe">豪华版 · 3D/全双工语音/视频小窗/联机掼蛋</option></select></div>
     <div style="margin-top:18px"><button class="primary" id="btn-apply" style="width:100%">创建房间并下载专属客户端</button></div>
     <div class="msg" id="apply-msg"></div>
-    <p class="hint">创建后自动通过，立即生成一份专属 HTML。把它发给朋友，朋友双击打开、填昵称即可进入。房间到期后所有消息自动销毁。</p>
+    <p class="hint">创建后自动通过，立即生成一份专属 HTML。简洁版专注文字/文件/语音条；豪华版额外提供 3D 牌桌场景、全双工语音、可拖拽视频小窗与联机掼蛋（含唯一旁观席位）。发给朋友双击打开即可进入。房间到期后所有消息自动销毁。</p>
     <div class="list" id="room-list"></div>
   </div>
 
@@ -110,10 +112,15 @@ button:disabled{opacity:.5;cursor:default}
       var st={issued:'已签发',active:'进行中',revoked:'已吊销',destroyed:'已销毁',destroying:'销毁中'}[r.status]||r.status;
       meta.textContent=st+' · 剩余 '+fmt(r.remainSeconds)+' · '+r.maxMembers+' 人上限';
       grow.appendChild(name);grow.appendChild(meta);
-      var dl=document.createElement('a');dl.href='/pc/api/rooms/'+r.roomId+'/client';dl.textContent='下载客户端';
+      var dlWrap=document.createElement('div');dlWrap.className='dlwrap';
+      var dl=document.createElement('a');dl.href='/pc/api/rooms/'+r.roomId+'/client?edition=lite';dl.textContent='简洁版';
+      dl.title='下载会重新签发并轮换凭证，先前下载的客户端立即失效';
+      var dlx=document.createElement('a');dlx.href='/pc/api/rooms/'+r.roomId+'/client?edition=deluxe';dlx.textContent='豪华版';
+      dlx.title='下载会重新签发并轮换凭证，先前下载的客户端立即失效';
+      dlWrap.appendChild(dl);dlWrap.appendChild(dlx);
       var del=document.createElement('button');del.className='destroy';del.textContent='销毁';
       del.onclick=function(){destroyRoom(r.roomId,r.name)};
-      item.appendChild(grow);item.appendChild(dl);item.appendChild(del);box.appendChild(item);
+      item.appendChild(grow);item.appendChild(dlWrap);item.appendChild(del);box.appendChild(item);
     });
   }
   function fmt(s){s=Math.max(0,s|0);var h=(s/3600)|0,m=((s%3600)/60)|0,x=s%60;return (h<10?'0':'')+h+':'+(m<10?'0':'')+m+':'+(x<10?'0':'')+x}
@@ -146,7 +153,7 @@ button:disabled{opacity:.5;cursor:default}
   loadPublic();setInterval(loadPublic,15000);
   $('btn-apply').onclick=function(){
     amsgt('正在创建…');
-    fetch('/pc/api/rooms/apply',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('r-name').value.trim(),ttlSeconds:Number($('r-ttl').value),maxMembers:Number($('r-max').value)})})
+    fetch('/pc/api/rooms/apply',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('r-name').value.trim(),ttlSeconds:Number($('r-ttl').value),maxMembers:Number($('r-max').value),edition:$('r-edition').value})})
     .then(function(r){
       if(r.status!==200){return r.json().then(function(j){amsgt(j.error||'创建失败','err')})}
       var cd=r.headers.get('content-disposition')||'';var mm=cd.match(/filename="([^"]+)"/);var fn=mm?mm[1]:'private-chat.html';

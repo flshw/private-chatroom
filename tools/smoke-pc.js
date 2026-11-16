@@ -63,7 +63,7 @@ function makeMember(label, cfg, uk) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(WS_URL);
     const m = { label, ws, uk, joined: false, sid: null, joinedFrame: null,
-      messages: [], errors: [], keyLists: [] };
+      messages: [], errors: [], keyLists: [], gameStates: [] };
     const timer = setTimeout(() => { try { ws.close(); } catch (e) {} reject(new Error(label + ' JOIN 超时')); }, 10000);
     ws.on('open', async () => {
       try {
@@ -103,6 +103,8 @@ function makeMember(label, cfg, uk) {
         await m.applyList(f.memberList, f.memberListSig, cfg.roomPubKey).catch(() => {});
       } else if (f.type === P.MSG.MSG_BROADCAST) {
         m.messages.push(f);
+      } else if (f.type === P.MSG.GAME_STATE) {
+        m.gameStates.push(f);
       } else if (f.type === P.MSG.ERROR) {
         m.errors.push(f.code);
       }
@@ -180,6 +182,17 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
     alice.keyLists.length >= 1 && alice.members.size === 2);
   check('成员名单 selfSig 逐条验签通过（A 侧）', alice.version >= 2);
 
+  /* single locked spectator: first claimant wins, second is rejected */
+  alice.ws.send(JSON.stringify({ type: P.MSG.GAME_SPECTATE, gameId: 'main' }));
+  await new Promise(r => setTimeout(r, 150));
+  const locked = alice.gameStates.concat(bob.gameStates).some(f =>
+    f.spectator && f.spectator.nickname === '阿明' && f.locked === true);
+  check('首个申请者锁定唯一旁观席位并广播', locked);
+  bob.ws.send(JSON.stringify({ type: P.MSG.GAME_SPECTATE, gameId: 'main' }));
+  await new Promise(r => setTimeout(r, 150));
+  check('第二名旁观申请被拒绝（E_SPECTATOR_TAKEN）',
+    bob.errors.indexOf(P.ERR.SPECTATOR_TAKEN) !== -1);
+
   /* encrypted message roundtrip: A -> B */
   const membersForA = Array.from(alice.members.values()).map(x => ({ sid: x.sid, ukPub: x.ukPub }));
   const plaintext = '端到端加密消息 roundtrip 🔒';
@@ -206,7 +219,9 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
     const buf = fs.readFileSync(dbFile);
     return buf.indexOf(Buffer.from(plaintext)) === -1;
   })());
-  check('合法消息未产生服务端 ERROR', alice.errors.length === 0 && bob.errors.length === 0);
+  // The only expected server error so far is Bob's rejected second spectator claim.
+  check('合法消息未产生服务端 ERROR', alice.errors.length === 0 &&
+    bob.errors.filter(c => c !== P.ERR.SPECTATOR_TAKEN).length === 0);
 
   /* replay rejected */
   alice.ws.send(JSON.stringify(frame)); // duplicate seq=1
@@ -245,6 +260,17 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
     html2.indexOf('/*__PC_CONFIG__*/') === -1);
   const st2 = await api('/room/' + cfg.roomId + '/status');
   check('房间在重新签发后仍活跃', st2.status === 200 && st2.body.ok);
+
+  /* deluxe edition download: distinct template with game + 3D modules */
+  const deluxeRes = await api('/rooms/' + cfg.roomId + '/client?edition=deluxe');
+  check('可下载豪华版客户端',
+    deluxeRes.status === 200 && /deluxe/.test(deluxeRes.headers.get('content-disposition') || ''));
+  check('豪华版含掼蛋/3D/旁观模块',
+    deluxeRes.text.indexOf('root.PCGame = api') !== -1 &&
+    deluxeRes.text.indexOf('window.PC3D = (function') !== -1 &&
+    deluxeRes.text.indexOf('id="btn-spectate"') !== -1);
+  check('豪华版无外部资源引用',
+    !/<script[^>]+src=/i.test(deluxeRes.text) && !/<link[^>]+href=/i.test(deluxeRes.text));
 
   /* admin force destroy -> room invalid */
   const destroyed = await jsonPost('/admin/rooms/' + cfg.roomId + '/destroy', {});

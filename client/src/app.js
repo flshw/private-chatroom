@@ -10,7 +10,7 @@
     config: null, offsetMs: 0, uk: null, mySid: null,
     seq: 0, serverTs: 0, joined: false, messages: [], expired: false
   };
-  var net = null, media = null, countdown = null;
+  var net = null, media = null, countdown = null, game = null;
 
   function show(id) {
     ['boot', 'gate', 'chat'].forEach(function (x) { $(x).classList.toggle('hidden', x !== id); });
@@ -152,6 +152,7 @@
       state.joined = true;
       state.seq = 0;
       enterChat();
+      if (game && f.spectator) game.onMessage({ kind: 'spectator', spectator: f.spectator });
       // Render history (ciphertext) that this member can decrypt.
       (f.history || []).forEach(renderEnvelope);
       updateMembersUI();
@@ -164,6 +165,9 @@
       renderEnvelope(f.envelope, f.sig, f.senderPub);
     } else if (f.type === PCProtocol.MSG.RTC_SIGNAL) {
       if (media) media.handleSignal(f.from, f.encryptedSignal);
+    } else if (f.type === PCProtocol.MSG.GAME_STATE) {
+      if (game) game.onMessage({ kind: 'spectator', spectator: f.spectator });
+      if (window.PCDeluxe && window.PCDeluxe.onGameState) window.PCDeluxe.onGameState(f);
     } else if (f.type === PCProtocol.MSG.ROOM_EXPIRED) {
       handleExpiry();
     } else if (f.type === PCProtocol.MSG.ERROR) {
@@ -202,6 +206,12 @@
     } catch (e) {
       if (e.message === '本条消息未向我封装') return; // not addressed to me (e.g., late joiner history)
       text = '[无法解密的消息：' + e.message + ']';
+    }
+    // Game payloads ride the same E2EE channel but are routed to the game
+    // engine instead of the chat transcript (deluxe edition only).
+    if (env.kind === 'game') {
+      try { if (game) game.onMessage(JSON.parse(text)); } catch (e) { /* ignore malformed game frame */ }
+      return;
     }
     var mine = env.senderSid === state.mySid;
     state.messages.push({
@@ -255,7 +265,7 @@
       row.appendChild(name); row.appendChild(badge);
       list.appendChild(row);
     });
-    PCMembers.safetyCode().then(function (c) { $('safety-code').textContent = '安全码 ' + c; });
+    try { $('safety-code').textContent = '安全码 ' + PCMembers.safetyCode(); } catch (e) {}
   }
 
   async function sendText() {
@@ -292,6 +302,17 @@
       onLocalStream: onLocalStream,
       onCallEnd: onCallEnd
     });
+    // Deluxe edition: initialise Guandan engine + UI. Simple edition is a no-op.
+    if (window.PCGameClient && window.PCDeluxe && window.PCDeluxe.bind) {
+      game = window.PCGameClient.create({
+        config: state.config, mySid: state.mySid, uk: state.uk, members: PCMembers,
+        sendGame: function (obj) { return sendKind(JSON.stringify(obj), 'game'); },
+        toast: toast,
+        onUpdate: function (st) { if (window.PCDeluxe.renderGame) window.PCDeluxe.renderGame(st, game); }
+      });
+      window.PCDeluxe.bind({ game: game, app: { net: net, media: media, state: state,
+        sendKind: sendKind, toast: toast } });
+    }
   }
 
   function startCountdown(expiresAt) {
@@ -317,7 +338,9 @@
     clearUK(state.config.roomId).then(function () { /* local plaintext cleared */ });
   }
 
+  function isDeluxe() { return !!(window.PCDeluxe && window.PCDeluxe.pipAddVideo); }
   function onLocalStream(stream) {
+    if (isDeluxe()) { window.PCDeluxe.pipAddVideo('video-local', stream, true); return; }
     var grid = $('video-grid');
     grid.innerHTML = '';
     var v = document.createElement('video');
@@ -326,13 +349,17 @@
     $('video-overlay').classList.remove('hidden');
   }
   function onRemoteTrack(sid, stream) {
+    if (isDeluxe()) { window.PCDeluxe.pipAddVideo('video-' + sid, stream, false); return; }
     var grid = $('video-grid');
     var v = document.createElement('video');
     v.id = 'video-' + sid; v.srcObject = stream; v.autoplay = true; v.playsInline = true;
     grid.appendChild(v);
     $('video-overlay').classList.remove('hidden');
   }
-  function onCallEnd() { $('video-overlay').classList.add('hidden'); $('video-grid').innerHTML = ''; }
+  function onCallEnd() {
+    if (isDeluxe()) { window.PCDeluxe.pipClear(); return; }
+    $('video-overlay').classList.add('hidden'); $('video-grid').innerHTML = '';
+  }
 
   /* --- wire events --- */
   $('btn-enter').addEventListener('click', enter);

@@ -219,6 +219,30 @@ const canonical = P.canonicalJSON;
   check('PCMedia 使用 new 构造', built.indexOf('new window.PCMedia(') !== -1 &&
     built.indexOf('= window.PCMedia(') === -1);
 
+  /* --- 11. Deluxe template + Guandan engine --- */
+  const deluxe = fs.readFileSync(path.join(ROOT, 'client/dist/private-chat-deluxe.template.html'), 'utf8');
+  ['掼蛋引擎 PCGame', '游戏客户端 PCGameClient', '3D 引擎 PC3D', '豪华版UI PCDeluxe',
+   '旁观按钮 btn-spectate', '游戏面板 game-panel'].forEach(function (pair) {
+    const marker = Array.isArray(pair) ? pair[1] : ({
+      '掼蛋引擎 PCGame': 'root.PCGame = api',
+      '游戏客户端 PCGameClient': 'window.PCGameClient = (function',
+      '3D 引擎 PC3D': 'window.PC3D = (function',
+      '豪华版UI PCDeluxe': 'window.PCDeluxe = (function',
+      '旁观按钮 btn-spectate': 'id="btn-spectate"',
+      '游戏面板 game-panel': 'id="game-panel"'
+    })[pair];
+    check('豪华版已内联 ' + pair, deluxe.indexOf(marker) !== -1);
+  });
+  check('豪华版无外部资源', !/<script[^>]+src=/i.test(deluxe) && !/<link[^>]+href=/i.test(deluxe));
+  // Regression guards for browser-only bugs caught during deluxe QA.
+  check('safetyCode 作为同步值使用（无 .then 误用）',
+    deluxe.indexOf('PCMembers.safetyCode().then') === -1);
+  check('3D 场景在豪华版初始化（PC3D.init 有调用）',
+    /PC3D[^\n]*\.init\(\)/.test(deluxe));
+  check('游戏初始化判断使用 PCDeluxe.bind（非不存在的 init）',
+    deluxe.indexOf('PCDeluxe && window.PCDeluxe.bind') !== -1);
+  /* Guandan engine behaviour is covered by tools/test-guandan.js. */
+
   console.log('\n=== 结果: ' + passed + ' 通过 / ' + failed + ' 失败 ===');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

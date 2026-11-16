@@ -148,12 +148,13 @@ window.PCMedia = function (ctx) {
     return pc;
   }
 
-  this.startCall = async function () {
+  this.startCall = async function (voiceOnly) {
     if (inCall) return;
     if (!navigator.mediaDevices || !window.RTCPeerConnection) {
-      ctx.toast('当前环境不支持视频通话，请使用在线入口'); return;
+      ctx.toast('当前环境不支持实时通话，请使用在线入口'); return;
     }
-    try { localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true }); }
+    var constraints = voiceOnly ? { video: false, audio: true } : { video: true, audio: true };
+    try { localStream = await navigator.mediaDevices.getUserMedia(constraints); }
     catch (e) { ctx.toast('无法访问摄像头/麦克风，请使用在线 HTTPS 入口'); return; }
     inCall = true;
     ctx.onLocalStream(localStream);

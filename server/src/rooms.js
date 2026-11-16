@@ -63,7 +63,7 @@ class Rooms {
       roomId, name: v.name, ttlSeconds: v.ttlSeconds, maxMembers: v.maxMembers,
       issuedAt: now, expiresAt: now + v.ttlSeconds * 1000
     };
-    const built = this.issuer.build(meta, this.serverSecret);
+    const built = this.issuer.build(meta, this.serverSecret, body.edition);
     this.db.createRoom({
       id: roomId, ownerId: user.id, name: v.name, status: 'issued',
       ttlSeconds: v.ttlSeconds, maxMembers: v.maxMembers,
@@ -88,7 +88,7 @@ class Rooms {
   }
 
   /* Download (re)issued client. Reissue rotates joinToken AND RK pair. */
-  issueClient(user, roomId) {
+  issueClient(user, roomId, edition) {
     const room = this.db.room(roomId);
     if (!room || room.owner_id !== user.id) throw Object.assign(new Error('房间不存在'), { status: 404 });
     if (room.status === 'destroyed' || room.status === 'destroying') {
@@ -103,7 +103,7 @@ class Rooms {
       roomId, name: room.name, maxMembers: room.max_members,
       issuedAt: now, expiresAt: room.expires_at
     };
-    const built = this.issuer.build(meta, this.serverSecret);
+    const built = this.issuer.build(meta, this.serverSecret, edition);
     // Old RK private key and token are invalidated immediately.
     this.keys.deleteRoomKey(roomId, room.room_priv_ref);
     this.db.reissueRoom(roomId, {

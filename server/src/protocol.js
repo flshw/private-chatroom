@@ -33,6 +33,9 @@
     MSG: 'msg',                         // C→S  {envelope, sig, senderPub}
     MSG_BROADCAST: 'msg_broadcast',     // S→*  above + fromSession
     RTC_SIGNAL: 'rtc_signal',           // ↔    {to, encryptedSignal}
+    GAME: 'game',                       // C→S  {gameId, round, action} — E2EE payload via msg kind='game'
+    GAME_STATE: 'game_state',           // S→*  server-authoritative turn/seat state (public, no cards)
+    GAME_SPECTATE: 'game_spectate',     // C→S  {gameId} — request the single spectator seat
     ROOM_EXPIRED: 'room_expired',       // S→C  {reason}
     ERROR: 'error',                     // S→C  {code, note?}
     PING: 'ping',
@@ -52,6 +55,7 @@
     BAD_VERSION: 'E_BAD_VERSION',
     BAD_ENVELOPE: 'E_BAD_ENVELOPE',
     NOT_AUTHENTICATED: 'E_NOT_AUTHENTICATED',
+    SPECTATOR_TAKEN: 'E_SPECTATOR_TAKEN',
     EXPIRED: 'E_EXPIRED',
     INTERNAL: 'E_INTERNAL'
   };
