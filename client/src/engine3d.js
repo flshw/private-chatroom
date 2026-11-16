@@ -179,7 +179,17 @@ window.PC3D = (function () {
 
   function start() { if (!ctx || running) return; running = true; last = 0; raf = requestAnimationFrame(frame); }
   function stop() { running = false; if (raf) cancelAnimationFrame(raf); raf = 0; }
+  /* Static backdrop: paint the gradient + grid + table ONCE, with no drifting
+   * particles or floating cards and no animation loop. Used when the user wants
+   * the ambience without motion. */
+  function renderStatic() {
+    stop();
+    if (!ctx) return;
+    drawBackground();
+    drawGrid();
+    drawTable();
+  }
 
-  return { init: init, start: start, stop: stop, resize: resize,
+  return { init: init, start: start, stop: stop, resize: resize, renderStatic: renderStatic,
     available: function () { return !!ctx; } };
 })();

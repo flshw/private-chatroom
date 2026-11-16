@@ -82,6 +82,16 @@ BASE_STYLES_PLACEHOLDER
   display:flex;align-items:center;justify-content:center;flex-wrap:wrap;align-content:center;gap:6px;
   padding:12px;background:rgba(10,16,34,.72);box-shadow:var(--shadow)}
 .game-table .tip{color:#c9bdff;font-size:14px;text-align:center}
+/* Play animation: freshly played cards deal in from below with a soft pop.
+ * Only cards tagged .play-in (new this render) run it, so re-renders don't
+ * replay the animation on cards already on the table. */
+@keyframes pc-card-play{
+  0%{opacity:0;transform:translateY(46px) scale(.72) rotate(-8deg)}
+  60%{opacity:1;transform:translateY(-6px) scale(1.08) rotate(2deg)}
+  100%{opacity:1;transform:translateY(0) scale(1) rotate(0)}
+}
+.game-table>.pcard.play-in{animation:pc-card-play .42s cubic-bezier(.2,.9,.25,1.1) both}
+@media(prefers-reduced-motion:reduce){.game-table>.pcard.play-in{animation:none}}
 /* Playing cards use .pcard (NOT .card): .card is the login/gate container in
  * the base stylesheet and must never be overridden by the card-face rules. */
 .pcard{width:44px;height:62px;border-radius:7px;background:#f3f6ff;color:#121a30;border:1px solid #c9d4ee;
@@ -95,6 +105,11 @@ BASE_STYLES_PLACEHOLDER
 .pcard .pip b{font-size:12px;font-weight:800}
 .pcard .pip i{font-style:normal;font-size:12px}
 .pcard.sel{transform:translateY(-12px);box-shadow:0 0 0 2px var(--brand),0 8px 16px rgba(0,0,0,.5);z-index:80!important}
+/* In a vertical fan the base rule .pcard-stack>.pcard has the SAME specificity
+ * and comes later, so it used to override .sel's highlight. This more specific
+ * rule makes a tapped card clearly lift and glow while staying readable. */
+.pcard-stack>.pcard.sel{transform:translateY(-18px)!important;
+  box-shadow:0 0 0 3px var(--brand),0 12px 22px rgba(0,0,0,.62)!important;z-index:95!important}
 .pcard.back{background:repeating-linear-gradient(45deg,#253a63,#253a63 6px,#1c2d50 6px,#1c2d50 12px);color:transparent;border-color:#3a5486}
 /* Push the hand + controls to the bottom so the floating table owns the upper
  * left while the centre stays clear for chat. */

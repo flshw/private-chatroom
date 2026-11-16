@@ -267,23 +267,40 @@ window.PCGameClient = (function () {
       }
     }
 
-    /* --- play / pass --- */
-    async function play(cardIds) {
-      if (state.phase !== 'playing' || state.spectator) return;
-      if (state.turn !== mySid) { toast('还没轮到你'); return; }
+    /* --- play / pass ---
+     * play() is synchronous: validation + optimistic local repaint happen now,
+     * and the authoritative state (table/turn/log) still arrives via the E2EE
+     * broadcast's onPlay. Returning a boolean lets the UI clear the selection
+     * in the SAME tick as the click — otherwise a fast second tap sees a stale
+     * selection and reports "pick a card first" although the play went through. */
+    function play(cardIds) {
+      if (state.phase !== 'playing' || state.spectator) return false;
+      if (state.turn !== mySid) { toast('还没轮到你'); return false; }
       var sel = state.hand.filter(function (c) { return cardIds.indexOf(c.id) !== -1; });
-      if (!sel.length || sel.length !== cardIds.length) { toast('无效的选牌'); return; }
+      if (!sel.length || sel.length !== cardIds.length) { toast('无效的选牌'); return false; }
       var pattern = window.PCGame.classify(sel, state.level);
-      if (!pattern) { toast('这不是合法牌型'); return; }
+      if (!pattern) { toast('这不是合法牌型'); return false; }
       if (!window.PCGame.canBeat(pattern, state.tablePattern, state.level)) {
-        toast('压不过桌面上的牌'); return;
+        toast('压不过桌面上的牌'); return false;
       }
       var msg = { kind: 'play', round: state.roundNo, by: mySid,
         cards: sel.map(function (c) { return { s: c.s, r: c.r, id: c.id }; }),
         pattern: { type: pattern.type, rank: pattern.rank, len: pattern.len } };
       sendGame(msg);
-      // Remove locally; host also broadcasts resolved state, but apply optimistically.
+      // Immediate visual acknowledgement: drop the played cards from the hand,
+      // credit the counter, and repaint — no waiting for the E2EE round trip.
+      // Turn/table/log are left to onPlay(broadcast) as the single source of truth.
       state.hand = state.hand.filter(function (c) { return cardIds.indexOf(c.id) === -1; });
+      sel.forEach(function (c) {
+        if (!state.played.some(function (p) { return p.id === c.id; })) state.played.push(c);
+      });
+      // Mirror the table locally so the play animation fires on the same tick
+      // as the tap; the broadcast's onPlay applies the identical cards/signature.
+      state.table = { cards: msg.cards, type: pattern.type, bySid: mySid };
+      state.tablePattern = pattern;
+      state.passes = 0;
+      onUpdate(state);
+      return true;
     }
 
     function pass() {
@@ -311,8 +328,8 @@ window.PCGameClient = (function () {
           return !(msg.cards || []).some(function (p) { return p.id === c.id; });
         });
       }
-      note((state.seats[seat] ? state.seats[seat].nickname : '玩家') + ' 出 ' +
-        (pattern ? pattern.name : '牌') + ' · ' + msg.cards.length + ' 张');
+      var who = state.seats[seat] ? state.seats[seat].nickname : '玩家';
+      note(who + ' 出 ' + cardsLabel(msg.cards, pattern));
       if (state.hand.length === 0 && state.finishOrder.indexOf(mySid) === -1) {
         state.finishOrder.push(mySid);
         note('你出完了！第 ' + state.finishOrder.length + ' 名');
@@ -395,6 +412,29 @@ window.PCGameClient = (function () {
 
     function rankName(r) {
       return ({ 15: '2', 14: 'A', 13: 'K', 12: 'Q', 11: 'J' })[r] || String(r);
+    }
+    /* Human-readable cards for the play log: e.g. "K♥", "对 7", "顺子 3-K".
+     * Suits make each play concrete without flooding the one-line log. */
+    function cardsLabel(cards, pattern) {
+      if (!cards || !cards.length) return '';
+      var SUIT = { S: '♠', H: '♥', C: '♣', D: '♦' };
+      function one(c) {
+        if (c.s === 'W') return c.r === 17 ? '大王' : '小王';
+        return rankName(c.r) + (SUIT[c.s] || '');
+      }
+      // TYPE codes: 1单张 2对子 3三张 4三带二 5顺子 6三连对 7钢板
+      //             8四带二 9炸弹 10同花顺 11王炸
+      var type = pattern && pattern.type;
+      if (cards.length === 1) return one(cards[0]);
+      if (type === 11) return '王炸 🃏👑';
+      if (type === 9 || type === 10) return (pattern.name || '炸弹') + ' ' + rankName(cards[0].r);
+      // Runs: show rank span, e.g. "顺子 3-J".
+      if (type === 5 || type === 6 || type === 7) {
+        return (pattern.name || '顺子') + ' ' + rankName(cards[0].r) + '-' + rankName(cards[cards.length - 1].r);
+      }
+      // Pairs / triples / carry combos: name + each concrete card face.
+      var faces = cards.map(one).join(' ');
+      return (pattern && pattern.name ? pattern.name + ' ' : '') + faces;
     }
 
     function onFinished(msg) {
@@ -533,6 +573,7 @@ window.PCGameClient = (function () {
       return s ? s.nickname : '玩家';
     };
     self.rankName = rankName;
+    self.cardsLabel = cardsLabel;
     self.botsEnabled = botsEnabled;
     self.isBotSid = isBotSid;
     self.botNick = botNick;

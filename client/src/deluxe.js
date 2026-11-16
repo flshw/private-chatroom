@@ -9,6 +9,7 @@ window.PCDeluxe = (function () {
   var game = null, ctx = null, voiceOn = false, selected = {};
   var membersList = [], mySid = null, picked = [], setupOpen = false;
   var spread = false; // false = stacked by rank (default), true = flat
+  var lastTableSig = ''; // signature of the last rendered table, for play animation
   var $ = function (id) { return document.getElementById(id); };
 
   function bind(o) {
@@ -16,7 +17,11 @@ window.PCDeluxe = (function () {
     mySid = (ctx && ctx.state && ctx.state.mySid) || null;
     if (window.PC3D) {
       if (!window.PC3D.available()) window.PC3D.init();
-      if (window.PC3D.available()) window.PC3D.start();
+      // Static backdrop only — no drifting cards/particle animation loop.
+      if (window.PC3D.available()) {
+        if (window.PC3D.renderStatic) window.PC3D.renderStatic();
+        else window.PC3D.start();
+      }
     }
     syncSeats();
   }
@@ -240,14 +245,29 @@ window.PCDeluxe = (function () {
       cnt.textContent = s ? (st.phase === 'dealing' ? '发牌中' : '·') : '—';
       el.appendChild(nm); el.appendChild(cnt); seats.appendChild(el);
     }
-    // Table (last play)
-    table.innerHTML = '';
-    if (st.table && st.table.cards) {
-      st.table.cards.forEach(function (c) { table.appendChild(cardEl(c, false)); });
-    } else {
-      var tip = document.createElement('div'); tip.className = 'tip';
-      tip.textContent = st.spectator ? '旁观中 · 等待玩家出牌' : (st.phase === 'idle' ? '点击「开局」开始' : '新一轮 · 请领出');
-      table.appendChild(tip);
+    // Table (last play). Animate only when the play actually CHANGES; ordinary
+    // re-renders (turn highlight, note, timer) keep the same signature so cards
+    // already on the table do not replay the animation.
+    var tSig = (st.table && st.table.cards && st.table.cards.length)
+      ? (st.table.bySid || '') + '|' + st.table.cards.map(function (c) { return c.id; }).join(',')
+      : '';
+    // Rebuild the table ONLY when the play changes. Leaving the DOM untouched
+    // on ordinary re-renders (or when the broadcast echoes the same cards) lets
+    // the play-in animation finish instead of being wiped mid-flight.
+    if (tSig !== lastTableSig) {
+      lastTableSig = tSig;
+      table.innerHTML = '';
+      if (st.table && st.table.cards && st.table.cards.length) {
+        st.table.cards.forEach(function (c) {
+          var el = cardEl(c, false);
+          el.classList.add('play-in');
+          table.appendChild(el);
+        });
+      } else {
+        var tip = document.createElement('div'); tip.className = 'tip';
+        tip.textContent = st.spectator ? '旁观中 · 等待玩家出牌' : (st.phase === 'idle' ? '点击「开局」开始' : '新一轮 · 请领出');
+        table.appendChild(tip);
+      }
     }
     // My hand — observers see the ONE target's hand (read-only), players see own.
     var shown = st.spectator ? (st.targetHand || []) : (st.hand || []);
@@ -312,7 +332,11 @@ window.PCDeluxe = (function () {
   function onPlayClick() {
     var ids = Object.keys(selected).filter(function (k) { return selected[k]; });
     if (!ids.length) { ctx.toast('先点选要出的牌'); return; }
-    game.play(ids).then(function () { selected = {}; });
+    // play() is synchronous and repaints optimistically (incl. the table play
+    // animation); clear the selection in the same tick so a second tap cannot
+    // re-send. No extra renderGame here — it would wipe the animation DOM.
+    var ok = game.play(ids);
+    if (ok) selected = {};
   }
 
   function onPassClick() { game.pass(); }

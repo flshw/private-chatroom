@@ -179,6 +179,16 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   display:flex;align-items:center;justify-content:center;flex-wrap:wrap;align-content:center;gap:6px;
   padding:12px;background:rgba(10,16,34,.72);box-shadow:var(--shadow)}
 .game-table .tip{color:#c9bdff;font-size:14px;text-align:center}
+/* Play animation: freshly played cards deal in from below with a soft pop.
+ * Only cards tagged .play-in (new this render) run it, so re-renders don't
+ * replay the animation on cards already on the table. */
+@keyframes pc-card-play{
+  0%{opacity:0;transform:translateY(46px) scale(.72) rotate(-8deg)}
+  60%{opacity:1;transform:translateY(-6px) scale(1.08) rotate(2deg)}
+  100%{opacity:1;transform:translateY(0) scale(1) rotate(0)}
+}
+.game-table>.pcard.play-in{animation:pc-card-play .42s cubic-bezier(.2,.9,.25,1.1) both}
+@media(prefers-reduced-motion:reduce){.game-table>.pcard.play-in{animation:none}}
 /* Playing cards use .pcard (NOT .card): .card is the login/gate container in
  * the base stylesheet and must never be overridden by the card-face rules. */
 .pcard{width:44px;height:62px;border-radius:7px;background:#f3f6ff;color:#121a30;border:1px solid #c9d4ee;
@@ -192,6 +202,11 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
 .pcard .pip b{font-size:12px;font-weight:800}
 .pcard .pip i{font-style:normal;font-size:12px}
 .pcard.sel{transform:translateY(-12px);box-shadow:0 0 0 2px var(--brand),0 8px 16px rgba(0,0,0,.5);z-index:80!important}
+/* In a vertical fan the base rule .pcard-stack>.pcard has the SAME specificity
+ * and comes later, so it used to override .sel's highlight. This more specific
+ * rule makes a tapped card clearly lift and glow while staying readable. */
+.pcard-stack>.pcard.sel{transform:translateY(-18px)!important;
+  box-shadow:0 0 0 3px var(--brand),0 12px 22px rgba(0,0,0,.62)!important;z-index:95!important}
 .pcard.back{background:repeating-linear-gradient(45deg,#253a63,#253a63 6px,#1c2d50 6px,#1c2d50 12px);color:transparent;border-color:#3a5486}
 /* Push the hand + controls to the bottom so the floating table owns the upper
  * left while the centre stays clear for chat. */
@@ -1879,23 +1894,40 @@ window.PCGameClient = (function () {
       }
     }
 
-    /* --- play / pass --- */
-    async function play(cardIds) {
-      if (state.phase !== 'playing' || state.spectator) return;
-      if (state.turn !== mySid) { toast('还没轮到你'); return; }
+    /* --- play / pass ---
+     * play() is synchronous: validation + optimistic local repaint happen now,
+     * and the authoritative state (table/turn/log) still arrives via the E2EE
+     * broadcast's onPlay. Returning a boolean lets the UI clear the selection
+     * in the SAME tick as the click — otherwise a fast second tap sees a stale
+     * selection and reports "pick a card first" although the play went through. */
+    function play(cardIds) {
+      if (state.phase !== 'playing' || state.spectator) return false;
+      if (state.turn !== mySid) { toast('还没轮到你'); return false; }
       var sel = state.hand.filter(function (c) { return cardIds.indexOf(c.id) !== -1; });
-      if (!sel.length || sel.length !== cardIds.length) { toast('无效的选牌'); return; }
+      if (!sel.length || sel.length !== cardIds.length) { toast('无效的选牌'); return false; }
       var pattern = window.PCGame.classify(sel, state.level);
-      if (!pattern) { toast('这不是合法牌型'); return; }
+      if (!pattern) { toast('这不是合法牌型'); return false; }
       if (!window.PCGame.canBeat(pattern, state.tablePattern, state.level)) {
-        toast('压不过桌面上的牌'); return;
+        toast('压不过桌面上的牌'); return false;
       }
       var msg = { kind: 'play', round: state.roundNo, by: mySid,
         cards: sel.map(function (c) { return { s: c.s, r: c.r, id: c.id }; }),
         pattern: { type: pattern.type, rank: pattern.rank, len: pattern.len } };
       sendGame(msg);
-      // Remove locally; host also broadcasts resolved state, but apply optimistically.
+      // Immediate visual acknowledgement: drop the played cards from the hand,
+      // credit the counter, and repaint — no waiting for the E2EE round trip.
+      // Turn/table/log are left to onPlay(broadcast) as the single source of truth.
       state.hand = state.hand.filter(function (c) { return cardIds.indexOf(c.id) === -1; });
+      sel.forEach(function (c) {
+        if (!state.played.some(function (p) { return p.id === c.id; })) state.played.push(c);
+      });
+      // Mirror the table locally so the play animation fires on the same tick
+      // as the tap; the broadcast's onPlay applies the identical cards/signature.
+      state.table = { cards: msg.cards, type: pattern.type, bySid: mySid };
+      state.tablePattern = pattern;
+      state.passes = 0;
+      onUpdate(state);
+      return true;
     }
 
     function pass() {
@@ -1923,8 +1955,8 @@ window.PCGameClient = (function () {
           return !(msg.cards || []).some(function (p) { return p.id === c.id; });
         });
       }
-      note((state.seats[seat] ? state.seats[seat].nickname : '玩家') + ' 出 ' +
-        (pattern ? pattern.name : '牌') + ' · ' + msg.cards.length + ' 张');
+      var who = state.seats[seat] ? state.seats[seat].nickname : '玩家';
+      note(who + ' 出 ' + cardsLabel(msg.cards, pattern));
       if (state.hand.length === 0 && state.finishOrder.indexOf(mySid) === -1) {
         state.finishOrder.push(mySid);
         note('你出完了！第 ' + state.finishOrder.length + ' 名');
@@ -2007,6 +2039,29 @@ window.PCGameClient = (function () {
 
     function rankName(r) {
       return ({ 15: '2', 14: 'A', 13: 'K', 12: 'Q', 11: 'J' })[r] || String(r);
+    }
+    /* Human-readable cards for the play log: e.g. "K♥", "对 7", "顺子 3-K".
+     * Suits make each play concrete without flooding the one-line log. */
+    function cardsLabel(cards, pattern) {
+      if (!cards || !cards.length) return '';
+      var SUIT = { S: '♠', H: '♥', C: '♣', D: '♦' };
+      function one(c) {
+        if (c.s === 'W') return c.r === 17 ? '大王' : '小王';
+        return rankName(c.r) + (SUIT[c.s] || '');
+      }
+      // TYPE codes: 1单张 2对子 3三张 4三带二 5顺子 6三连对 7钢板
+      //             8四带二 9炸弹 10同花顺 11王炸
+      var type = pattern && pattern.type;
+      if (cards.length === 1) return one(cards[0]);
+      if (type === 11) return '王炸 🃏👑';
+      if (type === 9 || type === 10) return (pattern.name || '炸弹') + ' ' + rankName(cards[0].r);
+      // Runs: show rank span, e.g. "顺子 3-J".
+      if (type === 5 || type === 6 || type === 7) {
+        return (pattern.name || '顺子') + ' ' + rankName(cards[0].r) + '-' + rankName(cards[cards.length - 1].r);
+      }
+      // Pairs / triples / carry combos: name + each concrete card face.
+      var faces = cards.map(one).join(' ');
+      return (pattern && pattern.name ? pattern.name + ' ' : '') + faces;
     }
 
     function onFinished(msg) {
@@ -2145,6 +2200,7 @@ window.PCGameClient = (function () {
       return s ? s.nickname : '玩家';
     };
     self.rankName = rankName;
+    self.cardsLabel = cardsLabel;
     self.botsEnabled = botsEnabled;
     self.isBotSid = isBotSid;
     self.botNick = botNick;
@@ -2338,8 +2394,18 @@ window.PC3D = (function () {
 
   function start() { if (!ctx || running) return; running = true; last = 0; raf = requestAnimationFrame(frame); }
   function stop() { running = false; if (raf) cancelAnimationFrame(raf); raf = 0; }
+  /* Static backdrop: paint the gradient + grid + table ONCE, with no drifting
+   * particles or floating cards and no animation loop. Used when the user wants
+   * the ambience without motion. */
+  function renderStatic() {
+    stop();
+    if (!ctx) return;
+    drawBackground();
+    drawGrid();
+    drawTable();
+  }
 
-  return { init: init, start: start, stop: stop, resize: resize,
+  return { init: init, start: start, stop: stop, resize: resize, renderStatic: renderStatic,
     available: function () { return !!ctx; } };
 })();
 
@@ -2356,6 +2422,7 @@ window.PCDeluxe = (function () {
   var game = null, ctx = null, voiceOn = false, selected = {};
   var membersList = [], mySid = null, picked = [], setupOpen = false;
   var spread = false; // false = stacked by rank (default), true = flat
+  var lastTableSig = ''; // signature of the last rendered table, for play animation
   var $ = function (id) { return document.getElementById(id); };
 
   function bind(o) {
@@ -2363,7 +2430,11 @@ window.PCDeluxe = (function () {
     mySid = (ctx && ctx.state && ctx.state.mySid) || null;
     if (window.PC3D) {
       if (!window.PC3D.available()) window.PC3D.init();
-      if (window.PC3D.available()) window.PC3D.start();
+      // Static backdrop only — no drifting cards/particle animation loop.
+      if (window.PC3D.available()) {
+        if (window.PC3D.renderStatic) window.PC3D.renderStatic();
+        else window.PC3D.start();
+      }
     }
     syncSeats();
   }
@@ -2587,14 +2658,29 @@ window.PCDeluxe = (function () {
       cnt.textContent = s ? (st.phase === 'dealing' ? '发牌中' : '·') : '—';
       el.appendChild(nm); el.appendChild(cnt); seats.appendChild(el);
     }
-    // Table (last play)
-    table.innerHTML = '';
-    if (st.table && st.table.cards) {
-      st.table.cards.forEach(function (c) { table.appendChild(cardEl(c, false)); });
-    } else {
-      var tip = document.createElement('div'); tip.className = 'tip';
-      tip.textContent = st.spectator ? '旁观中 · 等待玩家出牌' : (st.phase === 'idle' ? '点击「开局」开始' : '新一轮 · 请领出');
-      table.appendChild(tip);
+    // Table (last play). Animate only when the play actually CHANGES; ordinary
+    // re-renders (turn highlight, note, timer) keep the same signature so cards
+    // already on the table do not replay the animation.
+    var tSig = (st.table && st.table.cards && st.table.cards.length)
+      ? (st.table.bySid || '') + '|' + st.table.cards.map(function (c) { return c.id; }).join(',')
+      : '';
+    // Rebuild the table ONLY when the play changes. Leaving the DOM untouched
+    // on ordinary re-renders (or when the broadcast echoes the same cards) lets
+    // the play-in animation finish instead of being wiped mid-flight.
+    if (tSig !== lastTableSig) {
+      lastTableSig = tSig;
+      table.innerHTML = '';
+      if (st.table && st.table.cards && st.table.cards.length) {
+        st.table.cards.forEach(function (c) {
+          var el = cardEl(c, false);
+          el.classList.add('play-in');
+          table.appendChild(el);
+        });
+      } else {
+        var tip = document.createElement('div'); tip.className = 'tip';
+        tip.textContent = st.spectator ? '旁观中 · 等待玩家出牌' : (st.phase === 'idle' ? '点击「开局」开始' : '新一轮 · 请领出');
+        table.appendChild(tip);
+      }
     }
     // My hand — observers see the ONE target's hand (read-only), players see own.
     var shown = st.spectator ? (st.targetHand || []) : (st.hand || []);
@@ -2659,7 +2745,11 @@ window.PCDeluxe = (function () {
   function onPlayClick() {
     var ids = Object.keys(selected).filter(function (k) { return selected[k]; });
     if (!ids.length) { ctx.toast('先点选要出的牌'); return; }
-    game.play(ids).then(function () { selected = {}; });
+    // play() is synchronous and repaints optimistically (incl. the table play
+    // animation); clear the selection in the same tick so a second tap cannot
+    // re-send. No extra renderGame here — it would wipe the animation DOM.
+    var ok = game.play(ids);
+    if (ok) selected = {};
   }
 
   function onPassClick() { game.pass(); }
