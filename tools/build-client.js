@@ -136,6 +136,8 @@ const deluxeMarkers = baseMarkers.concat([
   ['过牌乐观即时反馈', 'state._passEchoSig'],
   ['过牌防重复计数', 'consume the guard, do not double-count'],
   ['过牌领出者修复', 'only a PLAY (never a pass) may win the trick'],
+  ['赢家出局领出顺延', 'function nextActiveSid(fromSid)'],
+  ['领出跳过出局座位', 'if (state.finishOrder.indexOf(leadSid) !== -1) {'],
   ['自动理牌按钮', 'id="btn-game-arrange"'],
   ['平铺切换按钮', 'id="btn-game-spread"'],
   ['理牌按点数降序', 'sortHandForView: sortHandForView'],

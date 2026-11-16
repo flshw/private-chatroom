@@ -1712,6 +1712,20 @@ window.PCGameClient = (function () {
       for (var i = 0; i < state.seats.length; i++) if (state.seats[i].sid === sid) return i;
       return -1;
     }
+    /* Next seat still holding cards (not finished) after fromSid, in turn order.
+     * Guandan: when the trick winner has already emptied their hand, the lead
+     * MUST pass to the next active player. Letting the lead land on a finished
+     * (cardless) seat deadlocks the table — nobody can play and the bots have
+     * no hand to drive, which is exactly "过牌后无人出牌". */
+    function nextActiveSid(fromSid) {
+      var i = seatOfSid(fromSid);
+      if (i < 0) return null;
+      for (var n = 1; n <= state.seats.length; n++) {
+        var cand = state.seats[(i + n) % state.seats.length];
+        if (state.finishOrder.indexOf(cand.sid) === -1) return cand.sid;
+      }
+      return null;
+    }
     function note(text) { state.log.push(text); if (state.log.length > 40) state.log.shift(); onUpdate(state); }
 
     /* Verified humans plus locally-injected bots. Bots fill the table up to
@@ -1973,6 +1987,12 @@ window.PCGameClient = (function () {
         // never by the last passer. lastWinner is updated only on play().
         state.table = null; state.tablePattern = null; state.passes = 0;
         var leadSid = state.lastWinner || by;
+        // If that winner has already emptied their hand (finished), the lead
+        // would land on a cardless seat and freeze the game. Hand it to the
+        // next player still in the game instead.
+        if (state.finishOrder.indexOf(leadSid) !== -1) {
+          leadSid = nextActiveSid(leadSid) || by;
+        }
         note('新一轮，由 ' + ((state.seats[seatOfSid(leadSid)] || {}).nickname || '玩家') + ' 领出');
         state.turn = leadSid;
       } else {
