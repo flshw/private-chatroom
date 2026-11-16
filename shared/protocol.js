@@ -59,6 +59,7 @@
   /* Limits. Tuned for N ≤ 20 members with per-member RSA-OAEP wrapping. */
   var LIMITS = {
     MAX_FRAME_BYTES: 1 << 20,           // 1 MiB per WS frame
+    MAX_HTTP_BODY_BYTES: 12 * 1024 * 1024, // base64 file upload envelope
     MAX_MSG_BYTES: 256 * 1024,          // plaintext text message ceiling
     MAX_FILE_BYTES: 8 * 1024 * 1024,    // 8 MiB ciphertext blob
     MAX_NICKNAME_CHARS: 24,

@@ -96,6 +96,43 @@ window.PCCrypto = (function () {
     return decipher.output.toString('utf8');
   }
 
+  /* Binary-safe variants for file/voice and RTC signaling payloads.
+   * The plain aesEncrypt/aesDecrypt above stay UTF-8 text APIs so that the
+   * message protocol and all existing signatures remain byte-identical. */
+  function bytesToBinary(bytes) {
+    if (typeof bytes === 'string') return bytes;
+    var arr = (bytes instanceof Uint8Array) ? bytes : new Uint8Array(bytes);
+    var out = '', chunk = 0x8000;
+    for (var i = 0; i < arr.length; i += chunk) {
+      out += String.fromCharCode.apply(null, arr.subarray(i, i + chunk));
+    }
+    return out;
+  }
+  function binaryToBytes(binary) {
+    var out = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i) & 0xff;
+    return out;
+  }
+  function aesEncryptBytes(keyRaw, aadString, bytes) {
+    var iv = randomBytes(12);
+    var cipher = forge.cipher.createCipher('AES-GCM', keyRaw);
+    cipher.start({ iv: iv, tagLength: 128, additionalData: forge.util.createBuffer(aadString, 'utf8') });
+    cipher.update(forge.util.createBuffer(bytesToBinary(bytes)));
+    if (!cipher.finish()) throw new Error('AES-GCM 加密失败');
+    return { iv: b64(iv), ct: b64(cipher.output.getBytes()), tag: b64(cipher.mode.tag.getBytes()) };
+  }
+  function aesDecryptBytes(keyRaw, aadString, ivB64, ctB64, tagB64) {
+    var decipher = forge.cipher.createDecipher('AES-GCM', keyRaw);
+    decipher.start({
+      iv: unb64(ivB64), tagLength: 128,
+      tag: forge.util.createBuffer(unb64(tagB64)),
+      additionalData: forge.util.createBuffer(aadString, 'utf8')
+    });
+    decipher.update(forge.util.createBuffer(unb64(ctB64)));
+    if (!decipher.finish()) throw new Error('GCM 认证失败');
+    return binaryToBytes(decipher.output.getBytes());
+  }
+
   /* RSA-OAEP wrap/unwrap a 32-byte content key. */
   function wrapKey(keyRaw, pubB64) {
     var key = importPublic(pubB64, ['encrypt']);
@@ -142,7 +179,10 @@ window.PCCrypto = (function () {
   return {
     available: available, randomBytes: randomBytes, b64: b64, unb64: unb64, bufToHex: bufToHex,
     generateUK: generateUK, sign: sign, verifySig: verifySig,
-    aesEncrypt: aesEncrypt, aesDecrypt: aesDecrypt, wrapKey: wrapKey, unwrapKey: unwrapKey,
+    aesEncrypt: aesEncrypt, aesDecrypt: aesDecrypt,
+    aesEncryptBytes: aesEncryptBytes, aesDecryptBytes: aesDecryptBytes,
+    bytesToBinary: bytesToBinary, binaryToBytes: binaryToBytes,
+    wrapKey: wrapKey, unwrapKey: unwrapKey,
     buildMessage: buildMessage, openMessage: openMessage,
     importPublic: importPublic, importPrivate: importPrivate, importVerifyKey: importVerifyKey,
     publicKeyPem: publicKeyPem, privateKeyPem: privateKeyPem,

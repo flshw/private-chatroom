@@ -17,6 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const nodeCrypto = require('crypto');
 const WebSocket = require('../server/node_modules/ws');
 const P = require('../shared/protocol.js');
 
@@ -172,6 +173,8 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
   await new Promise(r => setTimeout(r, 300));
   check('服务端接受密文消息并广播', bob.messages.length === 1 && alice.messages.length === 1);
   const broadcast = bob.messages[0];
+  check('实时广播把签名与公钥放在帧级字段',
+    !!broadcast.sig && !!broadcast.senderPub && !broadcast.envelope.sig);
   check('广播 envelope 的 wraps 覆盖全体成员',
     Object.keys(broadcast.envelope.wraps).sort().join(',') ===
     Array.from(bob.members.keys()).sort().join(','));
@@ -202,6 +205,20 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
   alice.ws.send(JSON.stringify(badFrame));
   await new Promise(r => setTimeout(r, 200));
   check('wraps 不完整被拒绝（E_WRAP_INCOMPLETE）', alice.errors.indexOf(P.ERR.WRAP_INCOMPLETE) !== -1);
+
+  /* encrypted file upload above the old 1 MiB HTTP limit */
+  const bigCt = nodeCrypto.randomBytes(800 * 1024).toString('base64');
+  const upRes = await jsonPost('/file/upload', {
+    roomId: cfg.roomId, sid: alice.sid,
+    iv: C.b64(C.randomBytes(12)), ct: bigCt, tag: C.b64(C.randomBytes(16))
+  });
+  check('超出旧 1 MiB 限制的文件密文可上传', upRes.status === 200 && upRes.body.ok && !!upRes.body.fileId);
+  if (upRes.body.ok) {
+    const getRes = await api('/file/get?id=' + encodeURIComponent(upRes.body.fileId) +
+      '&room=' + encodeURIComponent(cfg.roomId) + '&sid=' + encodeURIComponent(alice.sid));
+    check('上传的密文可原样取回', getRes.status === 200 && getRes.body.ok &&
+      getRes.body.file.ct === bigCt);
+  }
 
   try { alice.ws.close(); bob.ws.close(); } catch (e) {}
 

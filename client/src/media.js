@@ -24,7 +24,7 @@ window.PCMedia = function (ctx) {
   async function encryptAndUpload(bytes) {
     var K = PCCrypto.randomBytes(32);
     var aad = 'file|' + config.roomId + '|' + Date.now();
-    var enc = await PCCrypto.aesEncrypt(K, aad, bytes);
+    var enc = await PCCrypto.aesEncryptBytes(K, aad, bytes);
     var payload = {
       roomId: config.roomId, sid: ctx.mySid,
       iv: enc.iv, ct: enc.ct, tag: enc.tag
@@ -41,7 +41,7 @@ window.PCMedia = function (ctx) {
       '&room=' + encodeURIComponent(config.roomId) + '&sid=' + encodeURIComponent(ctx.mySid));
     if (!res.ok) throw new Error(res.error || '下载失败');
     var f = res.file;
-    var plain = await PCCrypto.aesDecrypt(PCCrypto.unb64(keyB64), aad || ('file|' + config.roomId),
+    var plain = await PCCrypto.aesDecryptBytes(PCCrypto.unb64(keyB64), aad || ('file|' + config.roomId),
       iv, f.ct, f.tag);
     return plain;
   }
@@ -60,29 +60,38 @@ window.PCMedia = function (ctx) {
     if (!navigator.mediaDevices || !window.MediaRecorder) {
       ctx.toast('当前环境不支持录音，请使用在线入口'); return;
     }
+    if (self._recording) {
+      self._recording = false;
+      if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+      ctx.toast('录音结束，正在加密发送…');
+      return;
+    }
+    if (self._pending) return;
+    self._pending = true;
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      self._pending = false;
+      if (self._recording) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
       chunks = [];
       mediaRecorder = new MediaRecorder(stream);
       mediaRecorder.ondataavailable = function (e) { if (e.data.size) chunks.push(e.data); };
       mediaRecorder.onstop = function () {
         stream.getTracks().forEach(function (t) { t.stop(); });
+        self._recording = false;
         if (!chunks.length) return;
         var blob = new Blob(chunks, { type: 'audio/webm' });
         blob.arrayBuffer().then(function (buf) {
           return self.sendFileLike(new Uint8Array(buf), 'voice.webm', 'audio/webm');
+        }).then(function () {
+          ctx.toast('语音已加密发送');
         }).catch(function (e) { ctx.toast('语音发送失败：' + e.message); });
       };
       mediaRecorder.start();
-      ctx.toast('录音中… 再次点击「🎤」结束');
-      self._recording = !self._recording;
-      if (self._recording) return;
-    }).catch(function () { ctx.toast('无法访问麦克风，请使用在线 HTTPS 入口'); });
-    if (self._recording) {
-      if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
-      self._recording = false;
-    } else {
       self._recording = true;
-    }
+      ctx.toast('录音中… 再次点击麦克风按钮结束');
+    }).catch(function () {
+      self._pending = false;
+      ctx.toast('无法访问麦克风，请使用在线 HTTPS 入口');
+    });
   };
 
   this.sendFileLike = async function (bytes, name, mime) {
@@ -110,7 +119,7 @@ window.PCMedia = function (ctx) {
     if (!target) return null;
     var text = JSON.stringify(obj);
     var K = PCCrypto.randomBytes(32);
-    var enc = await PCCrypto.aesEncrypt(K, 'rtc|' + config.roomId, new TextEncoder().encode(text));
+    var enc = await PCCrypto.aesEncrypt(K, 'rtc|' + config.roomId, text);
     var wrap = await PCCrypto.wrapKey(K, target.ukPub);
     return PCCrypto.b64(new TextEncoder().encode(JSON.stringify({
       iv: enc.iv, ct: enc.ct, tag: enc.tag, wrap: wrap

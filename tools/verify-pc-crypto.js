@@ -56,6 +56,8 @@ const canonical = P.canonicalJSON;
 
   check('内联 forge 加密栈可用', PCCrypto.available());
   check('canonicalJSON 协议常量就绪', typeof P.canonicalJSON === 'function' && typeof P.signedPart === 'function');
+  check('HTTP 文件上传上限覆盖 8 MiB 密文的 base64 膨胀',
+    P.LIMITS.MAX_HTTP_BODY_BYTES > P.LIMITS.MAX_FILE_BYTES * 4 / 3);
 
   /* --- 1. config signature: Node signs, browser verifies --- */
   const config = {
@@ -160,7 +162,36 @@ const canonical = P.canonicalJSON;
   check('AAD/时序篡改导致签名失效',
     PCCrypto.verifySig(P.signedPart(replEnv), frame.sig, alice.publicPem) === false);
 
-  /* --- 7. Reissue rotates RK: old RK destroyed --- */
+  /* --- 7. Binary file/voice payload roundtrip --- */
+  const fileKey = PCCrypto.randomBytes(32);
+  const fileAad = 'file|' + config.roomId + '|123456';
+  const fileBytes = new Uint8Array([0, 1, 2, 127, 128, 254, 255, 65, 0, 66]);
+  const fileEnc = PCCrypto.aesEncryptBytes(fileKey, fileAad, fileBytes);
+  const filePlain = PCCrypto.aesDecryptBytes(fileKey, fileAad, fileEnc.iv, fileEnc.ct, fileEnc.tag);
+  check('二进制文件密文可无损往返', !!filePlain &&
+    typeof filePlain.length === 'number' && filePlain.length === fileBytes.length &&
+    Array.from(fileBytes).every((b, i) => b === filePlain[i]),
+    '长度=' + (filePlain && filePlain.length) + '，实际=' + (filePlain && Array.from(filePlain).join(',')));
+  let fileTamperFail = false;
+  try { PCCrypto.aesDecryptBytes(fileKey, fileAad + 'x', fileEnc.iv, fileEnc.ct, fileEnc.tag); }
+  catch (e) { fileTamperFail = true; }
+  check('文件 AAD 篡改导致 GCM 认证失败', fileTamperFail);
+
+  /* --- 8. RTC signaling payload is wrapped to the target member --- */
+  const signalText = JSON.stringify({ kind: 'offer', sdp: { type: 'offer', sdp: 'v=0...' } });
+  const rtcKey = PCCrypto.randomBytes(32);
+  const rtcAad = 'rtc|' + config.roomId;
+  const rtcEnc = PCCrypto.aesEncrypt(rtcKey, rtcAad, signalText);
+  const rtcWrap = PCCrypto.wrapKey(rtcKey, bob.publicPem);
+  const rtcUnwrapped = PCCrypto.unwrapKey(rtcWrap, bob.privatePem);
+  check('RTC 信令按目标公钥封装且仅目标可解',
+    rtcUnwrapped === rtcKey &&
+    PCCrypto.aesDecrypt(rtcUnwrapped, rtcAad, rtcEnc.iv, rtcEnc.ct, rtcEnc.tag) === signalText);
+  let rtcWrongKeyFail = false;
+  try { PCCrypto.unwrapKey(rtcWrap, alice.privatePem); } catch (e) { rtcWrongKeyFail = true; }
+  check('非目标成员无法解封装 RTC 信令', rtcWrongKeyFail);
+
+  /* --- 9. Reissue rotates RK: old RK destroyed --- */
   const rk2 = keyStore.createRoomKey(config.roomId);
   check('重新签发产生不同的 RK 公钥', rk2.publicKeyPem !== rk.publicKeyPem);
   keyStore.deleteRoomKey(config.roomId, rk.ref);

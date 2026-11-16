@@ -161,7 +161,7 @@
       if (!ok2) { toast('成员身份校验失败，已忽略该名单'); return; }
       updateMembersUI();
     } else if (f.type === PCProtocol.MSG.MSG_BROADCAST) {
-      renderEnvelope(f.envelope);
+      renderEnvelope(f.envelope, f.sig, f.senderPub);
     } else if (f.type === PCProtocol.MSG.RTC_SIGNAL) {
       if (media) media.handleSignal(f.from, f.encryptedSignal);
     } else if (f.type === PCProtocol.MSG.ROOM_EXPIRED) {
@@ -187,16 +187,17 @@
     if (f.code === codes.ROOM_INVALID) handleExpiry();
   }
 
-  async function renderEnvelope(env) {
-    if (env.senderSid === state.mySid && env.fromSession === undefined) {
-      // Own echoed message from history is fine to render.
-    }
+  async function renderEnvelope(env, frameSig, frameSenderPub) {
+    // Live broadcasts put sig/senderPub on the frame; stored history keeps
+    // them inside the envelope. Accept both shapes.
+    var envSig = frameSig || env.sig;
+    var envSenderPub = frameSenderPub || env.senderPub;
     var sender = PCMembers.get(env.senderSid);
-    var senderPub = sender ? sender.ukPub : env.senderPub;
+    var senderPub = sender ? sender.ukPub : envSenderPub;
     var mySid = state.mySid;
     var text;
     try {
-      text = await PCCrypto.openMessage(env, env.sig, env.senderPub, mySid,
+      text = await PCCrypto.openMessage(env, envSig, envSenderPub, mySid,
         state.uk.privatePem, senderPub);
     } catch (e) {
       if (e.message === '本条消息未向我封装') return; // not addressed to me (e.g., late joiner history)

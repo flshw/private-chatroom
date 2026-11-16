@@ -207,6 +207,7 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   /* Limits. Tuned for N ≤ 20 members with per-member RSA-OAEP wrapping. */
   var LIMITS = {
     MAX_FRAME_BYTES: 1 << 20,           // 1 MiB per WS frame
+    MAX_HTTP_BODY_BYTES: 12 * 1024 * 1024, // base64 file upload envelope
     MAX_MSG_BYTES: 256 * 1024,          // plaintext text message ceiling
     MAX_FILE_BYTES: 8 * 1024 * 1024,    // 8 MiB ciphertext blob
     MAX_NICKNAME_CHARS: 24,
@@ -375,6 +376,43 @@ window.PCCrypto = (function () {
     return decipher.output.toString('utf8');
   }
 
+  /* Binary-safe variants for file/voice and RTC signaling payloads.
+   * The plain aesEncrypt/aesDecrypt above stay UTF-8 text APIs so that the
+   * message protocol and all existing signatures remain byte-identical. */
+  function bytesToBinary(bytes) {
+    if (typeof bytes === 'string') return bytes;
+    var arr = (bytes instanceof Uint8Array) ? bytes : new Uint8Array(bytes);
+    var out = '', chunk = 0x8000;
+    for (var i = 0; i < arr.length; i += chunk) {
+      out += String.fromCharCode.apply(null, arr.subarray(i, i + chunk));
+    }
+    return out;
+  }
+  function binaryToBytes(binary) {
+    var out = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i) & 0xff;
+    return out;
+  }
+  function aesEncryptBytes(keyRaw, aadString, bytes) {
+    var iv = randomBytes(12);
+    var cipher = forge.cipher.createCipher('AES-GCM', keyRaw);
+    cipher.start({ iv: iv, tagLength: 128, additionalData: forge.util.createBuffer(aadString, 'utf8') });
+    cipher.update(forge.util.createBuffer(bytesToBinary(bytes)));
+    if (!cipher.finish()) throw new Error('AES-GCM 加密失败');
+    return { iv: b64(iv), ct: b64(cipher.output.getBytes()), tag: b64(cipher.mode.tag.getBytes()) };
+  }
+  function aesDecryptBytes(keyRaw, aadString, ivB64, ctB64, tagB64) {
+    var decipher = forge.cipher.createDecipher('AES-GCM', keyRaw);
+    decipher.start({
+      iv: unb64(ivB64), tagLength: 128,
+      tag: forge.util.createBuffer(unb64(tagB64)),
+      additionalData: forge.util.createBuffer(aadString, 'utf8')
+    });
+    decipher.update(forge.util.createBuffer(unb64(ctB64)));
+    if (!decipher.finish()) throw new Error('GCM 认证失败');
+    return binaryToBytes(decipher.output.getBytes());
+  }
+
   /* RSA-OAEP wrap/unwrap a 32-byte content key. */
   function wrapKey(keyRaw, pubB64) {
     var key = importPublic(pubB64, ['encrypt']);
@@ -421,7 +459,10 @@ window.PCCrypto = (function () {
   return {
     available: available, randomBytes: randomBytes, b64: b64, unb64: unb64, bufToHex: bufToHex,
     generateUK: generateUK, sign: sign, verifySig: verifySig,
-    aesEncrypt: aesEncrypt, aesDecrypt: aesDecrypt, wrapKey: wrapKey, unwrapKey: unwrapKey,
+    aesEncrypt: aesEncrypt, aesDecrypt: aesDecrypt,
+    aesEncryptBytes: aesEncryptBytes, aesDecryptBytes: aesDecryptBytes,
+    bytesToBinary: bytesToBinary, binaryToBytes: binaryToBytes,
+    wrapKey: wrapKey, unwrapKey: unwrapKey,
     buildMessage: buildMessage, openMessage: openMessage,
     importPublic: importPublic, importPrivate: importPrivate, importVerifyKey: importVerifyKey,
     publicKeyPem: publicKeyPem, privateKeyPem: privateKeyPem,
@@ -640,7 +681,7 @@ window.PCMedia = function (ctx) {
   async function encryptAndUpload(bytes) {
     var K = PCCrypto.randomBytes(32);
     var aad = 'file|' + config.roomId + '|' + Date.now();
-    var enc = await PCCrypto.aesEncrypt(K, aad, bytes);
+    var enc = await PCCrypto.aesEncryptBytes(K, aad, bytes);
     var payload = {
       roomId: config.roomId, sid: ctx.mySid,
       iv: enc.iv, ct: enc.ct, tag: enc.tag
@@ -657,7 +698,7 @@ window.PCMedia = function (ctx) {
       '&room=' + encodeURIComponent(config.roomId) + '&sid=' + encodeURIComponent(ctx.mySid));
     if (!res.ok) throw new Error(res.error || '下载失败');
     var f = res.file;
-    var plain = await PCCrypto.aesDecrypt(PCCrypto.unb64(keyB64), aad || ('file|' + config.roomId),
+    var plain = await PCCrypto.aesDecryptBytes(PCCrypto.unb64(keyB64), aad || ('file|' + config.roomId),
       iv, f.ct, f.tag);
     return plain;
   }
@@ -676,29 +717,38 @@ window.PCMedia = function (ctx) {
     if (!navigator.mediaDevices || !window.MediaRecorder) {
       ctx.toast('当前环境不支持录音，请使用在线入口'); return;
     }
+    if (self._recording) {
+      self._recording = false;
+      if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+      ctx.toast('录音结束，正在加密发送…');
+      return;
+    }
+    if (self._pending) return;
+    self._pending = true;
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      self._pending = false;
+      if (self._recording) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
       chunks = [];
       mediaRecorder = new MediaRecorder(stream);
       mediaRecorder.ondataavailable = function (e) { if (e.data.size) chunks.push(e.data); };
       mediaRecorder.onstop = function () {
         stream.getTracks().forEach(function (t) { t.stop(); });
+        self._recording = false;
         if (!chunks.length) return;
         var blob = new Blob(chunks, { type: 'audio/webm' });
         blob.arrayBuffer().then(function (buf) {
           return self.sendFileLike(new Uint8Array(buf), 'voice.webm', 'audio/webm');
+        }).then(function () {
+          ctx.toast('语音已加密发送');
         }).catch(function (e) { ctx.toast('语音发送失败：' + e.message); });
       };
       mediaRecorder.start();
-      ctx.toast('录音中… 再次点击「🎤」结束');
-      self._recording = !self._recording;
-      if (self._recording) return;
-    }).catch(function () { ctx.toast('无法访问麦克风，请使用在线 HTTPS 入口'); });
-    if (self._recording) {
-      if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
-      self._recording = false;
-    } else {
       self._recording = true;
-    }
+      ctx.toast('录音中… 再次点击麦克风按钮结束');
+    }).catch(function () {
+      self._pending = false;
+      ctx.toast('无法访问麦克风，请使用在线 HTTPS 入口');
+    });
   };
 
   this.sendFileLike = async function (bytes, name, mime) {
@@ -726,7 +776,7 @@ window.PCMedia = function (ctx) {
     if (!target) return null;
     var text = JSON.stringify(obj);
     var K = PCCrypto.randomBytes(32);
-    var enc = await PCCrypto.aesEncrypt(K, 'rtc|' + config.roomId, new TextEncoder().encode(text));
+    var enc = await PCCrypto.aesEncrypt(K, 'rtc|' + config.roomId, text);
     var wrap = await PCCrypto.wrapKey(K, target.ukPub);
     return PCCrypto.b64(new TextEncoder().encode(JSON.stringify({
       iv: enc.iv, ct: enc.ct, tag: enc.tag, wrap: wrap
@@ -976,7 +1026,7 @@ window.PCMedia = function (ctx) {
       if (!ok2) { toast('成员身份校验失败，已忽略该名单'); return; }
       updateMembersUI();
     } else if (f.type === PCProtocol.MSG.MSG_BROADCAST) {
-      renderEnvelope(f.envelope);
+      renderEnvelope(f.envelope, f.sig, f.senderPub);
     } else if (f.type === PCProtocol.MSG.RTC_SIGNAL) {
       if (media) media.handleSignal(f.from, f.encryptedSignal);
     } else if (f.type === PCProtocol.MSG.ROOM_EXPIRED) {
@@ -1002,16 +1052,17 @@ window.PCMedia = function (ctx) {
     if (f.code === codes.ROOM_INVALID) handleExpiry();
   }
 
-  async function renderEnvelope(env) {
-    if (env.senderSid === state.mySid && env.fromSession === undefined) {
-      // Own echoed message from history is fine to render.
-    }
+  async function renderEnvelope(env, frameSig, frameSenderPub) {
+    // Live broadcasts put sig/senderPub on the frame; stored history keeps
+    // them inside the envelope. Accept both shapes.
+    var envSig = frameSig || env.sig;
+    var envSenderPub = frameSenderPub || env.senderPub;
     var sender = PCMembers.get(env.senderSid);
-    var senderPub = sender ? sender.ukPub : env.senderPub;
+    var senderPub = sender ? sender.ukPub : envSenderPub;
     var mySid = state.mySid;
     var text;
     try {
-      text = await PCCrypto.openMessage(env, env.sig, env.senderPub, mySid,
+      text = await PCCrypto.openMessage(env, envSig, envSenderPub, mySid,
         state.uk.privatePem, senderPub);
     } catch (e) {
       if (e.message === '本条消息未向我封装') return; // not addressed to me (e.g., late joiner history)

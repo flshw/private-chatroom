@@ -62,7 +62,7 @@ function readJson(req) {
     const chunks = [];
     req.on('data', c => {
       size += c.length;
-      if (size > P.LIMITS.MAX_FRAME_BYTES) { reject(new Error('body too large')); req.destroy(); return; }
+      if (size > P.LIMITS.MAX_HTTP_BODY_BYTES) { reject(new Error('body too large')); req.destroy(); return; }
       chunks.push(c);
     });
     req.on('end', () => {
@@ -107,21 +107,20 @@ function createHttpServer(options) {
     if (pathname === PUB + '/admin' || pathname === PUB + '/admin/') {
       return sendFile(res, path.join(ADMIN_DIR, 'index.html'));
     }
-    /* Online HTTPS entry for a room: serves the same baked client template.
-     * A real issued client is downloaded at /pc/api/rooms/:id/client; this
-     * route is a convenience for the `roomUrl` baked into config. */
+    /* Online room URL is informational only in v0.1. Passing joinToken in a
+     * query string would leak it through history/referrer/logs, and serving
+     * the bare template would hand out a client without a signed config. */
     const onlineMatch = pathname.match(new RegExp('^' + PUB + '/p/([A-Za-z0-9_]+)/?$'));
     if (onlineMatch) {
       const roomId = onlineMatch[1];
-      const token = url.searchParams.get('t') || '';
-      // Serve a freshly issued client only if the requester proves admission.
-      // Without a valid token, return the portal with a hint instead of the client.
       const room = db.room(roomId);
-      if (!room) return sendText(res, 404, '房间不存在或已销毁');
-      if (token) return sendFile(res, require('./paths').TEMPLATE_FILE);
+      if (!room || room.status === 'destroyed' || room.status === 'destroying') {
+        return sendText(res, 404, '房间不存在或已销毁');
+      }
       return sendText(res, 200,
         '<!doctype html><meta charset="utf-8"><title>私密聊天</title><h2>请使用下载好的专属客户端进入房间</h2>' +
-        '<p>在线入口需要访问凭证。请向发起人索取专属 HTML 文件，双击打开后即可进入。</p>',
+        '<p>为防止准入凭证经浏览器历史、Referer 或日志泄露，v0.1 不在网址中传递进入凭证。' +
+        '请向发起人索取专属 HTML 文件，双击打开后填写昵称即可进入。</p>',
         'text/html; charset=utf-8');
     }
 

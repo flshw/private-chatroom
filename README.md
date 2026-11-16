@@ -16,8 +16,8 @@
 
 本地验证结果（2026-11-16）：
 
-- `node tools/verify-pc-crypto.js`：**22 / 22 通过**
-- `node tools/smoke-pc.js`：**24 / 24 通过**
+- `node tools/verify-pc-crypto.js`：**27 / 27 通过**
+- `node tools/smoke-pc.js`：**27 / 27 通过**
 
 ## 目录结构
 
@@ -56,6 +56,8 @@ node server/src/main.js
 ```
 
 打开 `http://127.0.0.1:8443/Pchat/` 注册并创建房间。下载得到的 HTML 即为该房间的专属客户端，发给朋友后双击打开，填昵称即可入房。
+
+`/Pchat/p/:roomId` 在线地址在 v0.1 只显示使用提示，不通过网址传递 `joinToken`，避免凭证进入浏览器历史、Referer 或访问日志。
 
 冒烟测试：
 
