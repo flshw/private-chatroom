@@ -39,50 +39,32 @@
     return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
   }
 
-  /* --- IndexedDB: persist UK private key per room, never upload it --- */
-  var DB_NAME = 'pc_keys';
-  function openDb() {
-    return new Promise(function (resolve, reject) {
-      var req = indexedDB.open(DB_NAME, 1);
-      req.onupgradeneeded = function () {
-        var db = req.result;
-        if (!db.objectStoreNames.contains('uk')) db.createObjectStore('uk');
-      };
-      req.onsuccess = function () { resolve(req.result); };
-      req.onerror = function () { reject(req.error); };
-    });
-  }
+  /* --- localStorage: persist UK private key per room, never upload it ---
+   * The client is a local single file (file://). In Chromium, IndexedDB.open()
+   * on a file:// origin can stay pending forever, and the forge key object
+   * returned by generateUK() cannot be structured-cloned (DataCloneError).
+   * Both made the UK never persist, so F5 fell back to the login gate.
+   * Plain PEM strings in localStorage work everywhere and are enough: every
+   * crypto call reimports the PEM and never uses the cached kp object. */
+  function ukStoreKey(roomId) { return 'pc_uk_' + roomId; }
   async function loadUK(roomId) {
     try {
-      var db = await openDb();
-      return await new Promise(function (resolve, reject) {
-        var tx = db.transaction('uk', 'readonly');
-        var req = tx.objectStore('uk').get(roomId);
-        req.onsuccess = function () { resolve(req.result || null); };
-        req.onerror = function () { reject(req.error); };
-      });
+      var raw = localStorage.getItem(ukStoreKey(roomId));
+      if (!raw) return null;
+      var obj = JSON.parse(raw);
+      if (!obj || !obj.privatePem || !obj.publicPem) return null;
+      return { privatePem: obj.privatePem, publicPem: obj.publicPem, pubB64: obj.pubB64 || '' };
     } catch (e) { return null; }
   }
   async function saveUK(roomId, uk) {
     try {
-      var db = await openDb();
-      await new Promise(function (resolve, reject) {
-        var tx = db.transaction('uk', 'readwrite');
-        tx.objectStore('uk').put(uk, roomId);
-        tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { reject(tx.error); };
-      });
-    } catch (e) { /* noop */ }
+      localStorage.setItem(ukStoreKey(roomId), JSON.stringify({
+        privatePem: uk.privatePem, publicPem: uk.publicPem, pubB64: uk.pubB64 || ''
+      }));
+    } catch (e) { /* storage disabled: the session survives until refresh only */ }
   }
   async function clearUK(roomId) {
-    try {
-      var db = await openDb();
-      await new Promise(function (resolve) {
-        var tx = db.transaction('uk', 'readwrite');
-        tx.objectStore('uk').delete(roomId);
-        tx.oncomplete = function () { resolve(); };
-      });
-    } catch (e) { /* noop */ }
+    try { localStorage.removeItem(ukStoreKey(roomId)); } catch (e) { /* noop */ }
     try { localStorage.removeItem('pc_msgs_' + roomId); } catch (e) { /* noop */ }
   }
 
@@ -105,9 +87,9 @@
     // Preload a persisted UK for this room (refresh reuse).
     var cached = await loadUK(state.config.roomId);
     if (cached) state.uk = cached;
-    // Deluxe: F5 re-enters with the same local key + nickname, no gate click.
+    // F5 re-enters with the same local key + nickname, no gate click.
     var nick = savedNickname();
-    if (isDeluxe() && cached && nick) {
+    if (cached && nick) {
       $('nickname').value = nick;
       status('gate-status', '正在恢复房间会话…');
       enter();
@@ -290,7 +272,10 @@
     });
     try { $('safety-code').textContent = '安全码 ' + PCMembers.safetyCode(); } catch (e) {}
     if (window.PCDeluxe && window.PCDeluxe.onMembers) {
-      window.PCDeluxe.onMembers(PCMembers.all(), state.mySid);
+      // Deluxe seat picker sees the auto-filled bot roster (real members +
+      // local bots) so a solo tester can start a 4-seat Guandan match.
+      var roster = game && game.roster ? game.roster() : PCMembers.all();
+      window.PCDeluxe.onMembers(roster, state.mySid);
     }
   }
 
@@ -332,6 +317,7 @@
     if (window.PCGameClient && window.PCDeluxe && window.PCDeluxe.bind) {
       game = window.PCGameClient.create({
         config: state.config, mySid: state.mySid, uk: state.uk, members: PCMembers,
+        bots: isDeluxe(),   // deluxe auto-fills up to 4 seats with local bots for testing
         sendGame: function (obj) { return sendKind(JSON.stringify(obj), 'game'); },
         sendControl: function (frame) { if (net) net.send(frame); },
         toast: toast,
@@ -364,6 +350,29 @@
     $('btn-send').disabled = true;
     clearNickname();
     clearUK(state.config.roomId).then(function () { /* local plaintext cleared */ });
+  }
+
+  /* Voluntary leave: wipe local credentials so a refresh will NOT auto-rejoin,
+   * tear down every transport, and return to the nickname gate. */
+  function leaveRoom() {
+    if (!state.joined && !entering) { show('gate'); return; }
+    if (!window.confirm('确定退出当前聊天室吗？\n退出后本机密钥会被清除，下次进入需重新输入昵称。')) return;
+    state.expired = false;
+    if (countdown) { clearInterval(countdown); countdown = null; }
+    if (media) { try { if (media.inCall()) media.hangup(); } catch (e) {} media = null; }
+    if (window.PCDeluxe && window.PCDeluxe.pipClear) window.PCDeluxe.pipClear();
+    if (net) { net.close(); net = null; }
+    game = null;
+    state.joined = false; state.mySid = null; state.seq = 0; state.uk = null;
+    state.messages = []; entering = false;
+    $('messages').innerHTML = '';
+    $('input').value = ''; $('input').disabled = false; $('btn-send').disabled = false;
+    var gp = $('game-panel'); if (gp) gp.classList.add('hidden');
+    var mp = $('members-panel'); if (mp) mp.classList.add('hidden');
+    $('nickname').value = '';
+    clearNickname(); clearUK(state.config.roomId);
+    show('gate');
+    $('nickname').focus();
   }
 
   function isDeluxe() { return !!(window.PCDeluxe && window.PCDeluxe.pipAddVideo); }
@@ -405,6 +414,7 @@
   $('btn-voice').addEventListener('click', function () { if (media) media.recordVoice(); });
   $('btn-video').addEventListener('click', function () { if (media) media.startCall(); });
   $('btn-hangup').addEventListener('click', function () { if (media) media.hangup(); });
+  $('btn-exit').addEventListener('click', leaveRoom);
 
   boot();
 })();

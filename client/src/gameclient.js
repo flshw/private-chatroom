@@ -15,6 +15,13 @@
 window.PCGameClient = (function () {
   var P = window.PCProtocol;
 
+  /* Test partners: deterministic virtual seats so every client computes the
+   * same roster. They are NOT server members and hold no keys — the host keeps
+   * their hands in plaintext locally and drives their moves over the E2EE game
+   * channel, so the server still sees ciphertext only. */
+  var BOT_SIDS = ['bot_1', 'bot_2', 'bot_3'];
+  var BOT_NICKS = ['🤖 牌手1', '🤖 牌手2', '🤖 牌手3'];
+
   function create(ctx) {
     var self = {};
     var config = ctx.config, mySid = ctx.mySid, uk = ctx.uk;
@@ -23,6 +30,13 @@ window.PCGameClient = (function () {
     var sendControl = ctx.sendControl || function () {}; // raw server control frames
     var toast = ctx.toast || function () {};
     var onUpdate = ctx.onUpdate || function () {};
+    var botsEnabled = !!ctx.bots;        // deluxe only; simple edition has none
+    var botTimer = null;                 // scheduler for the local bot's next move
+    var botThinkingMs = 650;             // small delay so humans can follow along
+
+    function isBotSid(sid) { return BOT_SIDS.indexOf(sid) !== -1; }
+    function botNick(sid) { var i = BOT_SIDS.indexOf(sid); return i < 0 ? '机器人' : BOT_NICKS[i]; }
+    function clearBotTimer() { if (botTimer) { clearTimeout(botTimer); botTimer = null; } }
 
     var state = {
       level: 15,                      // start at 2
@@ -45,6 +59,8 @@ window.PCGameClient = (function () {
       pendingForMe: null,             // a pending request where I am the target
       watchTargetSid: null,          // the one player I am watching
       targetHand: [],                // target's hand, decrypted for me as observer
+      bots: [],                      // virtual bot seats [{sid,nickname,isBot,isMe:false,ukPub:null}]
+      botHands: {},                  // HOST ONLY: botSid -> plaintext cards (never leaves host)
       log: []
     };
 
@@ -57,17 +73,51 @@ window.PCGameClient = (function () {
     }
     function note(text) { state.log.push(text); if (state.log.length > 40) state.log.shift(); onUpdate(state); }
 
-    /* Recompute seats from verified member list; lowest sid = host.
+    /* Verified humans plus locally-injected bots. Bots fill the table up to
+     * four while humans < 4, and disappear as real players arrive. Humans are
+     * always ordered before bots so seat 0 (the deal host) is a real person. */
+    function allRoster() {
+      var humans = members.all().slice().sort(function (a, b) { return a.sid.localeCompare(b.sid); });
+      var roster = humans.slice();
+      // Bots are single-player TEST STANDS-INS: exactly one real member in the
+      // room => fill three bots so a solo tester can play 4-seat Guandan. As
+      // soon as a second human joins, ALL bots step aside for the real players.
+      // While a match is live the bot set is frozen so a mid-round join cannot
+      // shuffle the seated players; the change applies from the next match.
+      var wantBots = botsEnabled && humans.length === 1;
+      if ((state.phase === 'playing' || state.phase === 'dealing') && state.bots.length) {
+        wantBots = true; // keep current bots until this round finishes
+      }
+      var next = [];
+      if (wantBots) {
+        for (var i = 0; i < BOT_SIDS.length; i++) {
+          next.push({ sid: BOT_SIDS[i], nickname: BOT_NICKS[i],
+            isBot: true, isMe: false, ukPub: null });
+        }
+      }
+      state.bots = next;
+      if (next.length) roster = roster.concat(next);
+      return roster;
+    }
+
+    function poolMember(sid) {
+      var m = members.get(sid);
+      if (m) return m;
+      for (var i = 0; i < state.bots.length; i++) if (state.bots[i].sid === sid) return state.bots[i];
+      return null;
+    }
+
+    /* Recompute seats from verified member list + bots; lowest sid = host.
      * An approved observer does not take a seat; being watched does not. */
     function syncSeats() {
-      var all = members.all().slice().sort(function (a, b) { return a.sid.localeCompare(b.sid); });
-      var pool = all;
+      var roster = allRoster();
+      var pool = roster;
       if (state.players && state.players.length === 4) {
-        pool = state.players.map(function (sid) { return members.get(sid); }).filter(Boolean);
+        pool = state.players.map(function (sid) { return poolMember(sid); }).filter(Boolean);
       }
       if (state.spectator) pool = pool.filter(function (m) { return m.sid !== mySid; });
       state.seats = pool.slice(0, 4).map(function (m) {
-        return { sid: m.sid, nickname: m.nickname, isMe: m.sid === mySid };
+        return { sid: m.sid, nickname: m.nickname, isBot: !!m.isBot, isMe: m.sid === mySid };
       });
       state.mySeat = seatOfSid(mySid);
       state.hostSid = state.seats.length ? state.seats[0].sid : null;
@@ -80,11 +130,15 @@ window.PCGameClient = (function () {
       if (!ids || ids.length !== 4) return false;
       var seen = {}, list = [];
       ids.forEach(function (sid) {
-        if (!sid || seen[sid] || !members.get(sid)) return;
+        if (!sid || seen[sid] || !poolMember(sid)) return;
         seen[sid] = true; list.push(sid);
       });
       if (list.length !== 4) return false;
-      list.sort(function (a, b) { return a.localeCompare(b); });
+      // Real humans first (lowest sid = deal host), then bots in fixed order.
+      list.sort(function (a, b) {
+        var ba = isBotSid(a) ? 1 : 0, bb = isBotSid(b) ? 1 : 0;
+        return ba - bb || a.localeCompare(b);
+      });
       state.players = list;
       syncSeats(); onUpdate(state);
       return true;
@@ -97,8 +151,15 @@ window.PCGameClient = (function () {
       var deck = window.PCGame.makeDeck();
       var hands = window.PCGame.deal(deck);
       var wrapped = {};
+      state.botHands = {};
       for (var i = 0; i < 4; i++) {
         var seat = state.seats[i];
+        // Bot seats have no public key: the HOST keeps their cards in plaintext
+        // locally and drives their moves. No bot hand ever leaves the host.
+        if (seat.isBot) {
+          state.botHands[seat.sid] = window.PCBots.sortedHand(hands[i], state.level, window.PCGame);
+          continue;
+        }
         var m = members.get(seat.sid);
         if (!m) return null;
         var K = window.PCCrypto.randomBytes(32);
@@ -131,6 +192,7 @@ window.PCGameClient = (function () {
       }
       return { kind: 'deal', round: state.roundNo, level: state.level, hands: wrapped,
         host: mySid, order: state.seats.map(function (s) { return s.sid; }),
+        bots: state.seats.filter(function (s) { return s.isBot; }).map(function (s) { return s.sid; }),
         watchTargetOf: (function () {
           var m = {};
           for (var z = 0; z < state.spectate.length; z++) {
@@ -147,8 +209,9 @@ window.PCGameClient = (function () {
       state.level = msg.level;
       state.hostSid = msg.host;
       state.phase = 'playing';
-      state.table = null; state.passes = 0; state.finishOrder = []; state.log = [];
-      state.played = [];
+      state.table = null; state.tablePattern = null; state.passes = 0;
+      state.finishOrder = []; state.log = []; state.played = [];
+      state.botHands = state.botHands || {};
       if (msg.order && msg.order.length === 4) state.players = msg.order.slice();
       syncSeats();
       if (state.spectator) {
@@ -182,6 +245,7 @@ window.PCGameClient = (function () {
       }
       state.turn = (msg.order && msg.order[0]) || state.turn;
       onUpdate(state);
+      scheduleBot();
     }
 
     async function openDealForLate(msg) {
@@ -268,6 +332,7 @@ window.PCGameClient = (function () {
         advanceTurn(msg.by);
       }
       onUpdate(state);
+      scheduleBot();
     }
 
     function advanceTurn(fromSid) {
@@ -278,6 +343,52 @@ window.PCGameClient = (function () {
       }
       state.lastWinner = fromSid;
       onUpdate(state);
+      scheduleBot();
+    }
+
+    /* --- local bot driver (host only) ---
+     * Only the deal host owns bot hands. When the turn lands on a bot seat, it
+     * arranges/decides with PCBots and publishes the move through the SAME E2EE
+     * game channel. Every player receives the broadcast and applies onPlay /
+     * onPass, so seats, table and card counter stay in sync everywhere. */
+    function scheduleBot() {
+      clearBotTimer();
+      if (!botsEnabled || !isHost() || state.phase !== 'playing' || state.spectator) return;
+      var sid = state.turn;
+      if (!sid || !isBotSid(sid)) return;
+      if (!state.botHands || !state.botHands[sid] || !state.botHands[sid].length) return;
+      botTimer = setTimeout(function () { botTimer = null; botStep(sid); }, botThinkingMs);
+    }
+
+    function botStep(sid) {
+      // Re-validate after the think delay: state may have moved on.
+      if (!isHost() || state.phase !== 'playing' || state.spectator || state.turn !== sid) return;
+      var hand = state.botHands[sid];
+      if (!hand || !hand.length) return;
+      var move = null;
+      try {
+        move = window.PCBots.chooseMove({
+          hand: hand, tablePattern: state.tablePattern || null, level: state.level
+        }, window.PCGame);
+      } catch (e) { move = null; }
+      if (!move) {
+        // Cannot beat the table -> pass (legal whenever there is a table).
+        sendGame({ kind: 'pass', round: state.roundNo, by: sid });
+        return;
+      }
+      var ids = {};
+      move.cards.forEach(function (c) { ids[c.id] = true; });
+      state.botHands[sid] = hand.filter(function (c) { return !ids[c.id]; });
+      sendGame({ kind: 'play', round: state.roundNo, by: sid,
+        cards: move.cards.map(function (c) { return { s: c.s, r: c.r, id: c.id }; }),
+        pattern: { type: move.pattern.type, rank: move.pattern.rank, len: move.pattern.len },
+        bot: true });
+      // Bot finished its cards -> announce so team scoring can resolve.
+      if (!state.botHands[sid].length) {
+        var order = state.finishOrder.slice();
+        if (order.indexOf(sid) === -1) order.push(sid);
+        sendGame({ kind: 'finished', round: state.roundNo, by: sid, order: order });
+      }
     }
 
     function rankName(r) {
@@ -403,6 +514,10 @@ window.PCGameClient = (function () {
       return s ? s.nickname : '玩家';
     };
     self.rankName = rankName;
+    self.botsEnabled = botsEnabled;
+    self.isBotSid = isBotSid;
+    self.botNick = botNick;
+    self.roster = allRoster;      // real members + auto-filled bots (for seat picker)
     return self;
   }
 

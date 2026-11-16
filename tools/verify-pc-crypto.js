@@ -252,9 +252,24 @@ const canonical = P.canonicalJSON;
     deluxe.indexOf("d.className = 'pcard'") !== -1);
   check('3D 画布使用高优先级 fixed 定位（不遮挡聊天/游戏）',
     deluxe.indexOf('#chat>#scene3d{position:fixed') !== -1);
-  check('F5 刷新自动恢复豪华版会话',
+  check('F5 刷新自动恢复会话（localStorage 密钥，两版通用）',
     deluxe.indexOf('var nick = savedNickname();') !== -1 &&
-    deluxe.indexOf('if (isDeluxe() && cached && nick)') !== -1);
+    deluxe.indexOf('if (cached && nick)') !== -1 &&
+    deluxe.indexOf('localStorage.setItem(ukStoreKey(roomId)') !== -1 &&
+    deluxe.indexOf('indexedDB.open') === -1);
+  check('两版均提供退出房间按钮与清理流程',
+    built.indexOf('id="btn-exit"') !== -1 &&
+    deluxe.indexOf('id="btn-exit"') !== -1 &&
+    built.indexOf('function leaveRoom()') !== -1 &&
+    built.indexOf("clearNickname(); clearUK(state.config.roomId);") !== -1);
+  check('机器人补位（仅单人时创建3个，第二真人进入即退出）',
+    deluxe.indexOf("BOT_SIDS = ['bot_1', 'bot_2', 'bot_3']") !== -1 &&
+    deluxe.indexOf('humans.length === 1') !== -1 &&
+    deluxe.indexOf('root.PCBots = api') !== -1 &&
+    deluxe.indexOf('function botStep(sid)') !== -1);
+  check('机器人手牌仅存房主本地（不经 E2EE 广播机器人手牌）',
+    deluxe.indexOf('state.botHands[seat.sid] = window.PCBots.sortedHand') !== -1 &&
+    deluxe.indexOf('bots: state.seats.filter') !== -1);
   check('游戏按钮按 4 人门槛启用', deluxe.indexOf('membersList.length >= 4') !== -1);
   check('开局必须选择另外 3 名玩家',
     deluxe.indexOf('game.requestStart([mySid].concat(picked));') !== -1 &&

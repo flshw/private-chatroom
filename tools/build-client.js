@@ -44,6 +44,9 @@ const baseMarkers = [
   ['网络层', 'window.PCNet = function'],
   ['导出模块', 'window.PCExport = (function'],
   ['媒体模块', 'window.PCMedia = function'],
+  ['localStorage 密钥持久化', "localStorage.setItem(ukStoreKey(roomId)"],
+  ['退出房间按钮', 'id="btn-exit"'],
+  ['退出房间流程', 'function leaveRoom()'],
   ['启动脚本', 'boot();']
 ];
 
@@ -91,6 +94,7 @@ const deluxeParts = Object.assign({
   __TEMPLATE__: 'client/src/template-deluxe.html',
   __CSS__: deluxeCss,
   '__GAME__': safeJs(read('client/src/game.js')),
+  '__BOTS__': safeJs(read('client/src/bots.js')),
   '__GAMECLIENT__': safeJs(read('client/src/gameclient.js')),
   '__ENGINE3D__': safeJs(read('client/src/engine3d.js')),
   '__DELUXE__': safeJs(read('client/src/deluxe.js'))
@@ -98,6 +102,7 @@ const deluxeParts = Object.assign({
 const deluxeMarkers = baseMarkers.concat([
   ['3D 画布层级', '#chat>#scene3d{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}'],
   ['刷新自动续进', 'var nick = savedNickname();'],
+  ['两版通用续进', 'if (cached && nick) {'],
   ['四人开局门槛', 'membersList.length >= 4'],
   ['三人选座开局', 'game.requestStart([mySid].concat(picked));'],
   ['记牌器面板', 'id="card-counter"'],
@@ -107,6 +112,10 @@ const deluxeMarkers = baseMarkers.concat([
   ['底部出牌按钮', 'class="game-bottom"'],
   ['出牌统计', 'state.played.push('],
   ['掼蛋引擎', 'root.PCGame = api'],
+  ['机器人引擎', 'root.PCBots = api'],
+  ['机器人自动理牌', 'function arrange(hand, level, G)'],
+  ['机器人自动出牌', 'function botStep(sid)'],
+  ['机器人补位座位', "BOT_SIDS = ['bot_1', 'bot_2', 'bot_3']"],
   ['游戏客户端', 'window.PCGameClient = (function'],
   ['3D 引擎', 'window.PC3D = (function'],
   ['豪华版UI', 'window.PCDeluxe = (function']

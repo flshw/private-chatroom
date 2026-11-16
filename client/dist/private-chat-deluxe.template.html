@@ -47,6 +47,8 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   border-radius:10px;padding:8px 11px;cursor:pointer;font-size:14px;white-space:nowrap;
 }
 .icon:hover{border-color:var(--brand)}
+.icon.exit{color:var(--danger);border-color:rgba(255,99,99,.45)}
+.icon.exit:hover{background:var(--danger);color:#fff;border-color:var(--danger)}
 .danger{border:none;background:var(--danger);color:#fff;border-radius:10px;padding:10px 18px;cursor:pointer;font-weight:650}
 .status{color:var(--muted);font-size:13px;margin-top:14px;min-height:18px}
 .status.err{color:var(--danger)}
@@ -229,6 +231,7 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     <button class="tool-btn" id="btn-game" disabled>🃏 掼蛋</button>
     <button class="tool-btn" id="btn-voice-live">🎧 全双工语音</button>
     <button class="icon" id="btn-members" title="成员列表">成员</button>
+    <button class="icon exit" id="btn-exit" title="退出房间（清除本机密钥）">退出</button>
   </header>
   <div class="main">
     <div id="messages" class="messages"></div>
@@ -1319,6 +1322,255 @@ window.PCMedia = function (ctx) {
 
 </script>
 <script>
+/* Copyright (c) 2026 CJS flshw@126.com — Guandan bot (test partner). */
+'use strict';
+/*
+ * PCBots — a deterministic, self-contained Guandan partner bot. Used only to
+ * let ONE human test a four-seat match: the host client drives 3 local bots.
+ * It never talks to the network; bots hand over their seat's cards to the host
+ * locally, and every bot move is broadcast through the same E2EE game channel.
+ *
+ * Arrangement strategy (compiled from published Guandan guidance):
+ *   1) 减轮次、去单化  — fold loose singles into straights / double-straights /
+ *      triple-pairs so the hand is played in as few tricks as possible.
+ *   2) 炸弹优先，绝不乱拆 — keep natural 4-of-a-kind, straight-flushes and the
+ *      rocket intact; never break a bomb to make a short sequence.
+ *   3) 逢人配价值最大化 — a red level-card (wild) is kept for a long straight
+ *      or a bomb, never wasted on a lone pair.
+ *   4) 情况不明，对子先行 — lead with the lowest pair when nothing is known.
+ *   5) 小炸及时用，大炸沉住气 — when answering, play the smallest legal combo;
+ *      hold stronger bombs back unless they are the only answer.
+ *
+ * UMD: window.PCBots in browsers, module.exports in Node (unit tests).
+ */
+(function (root, factory) {
+  var api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.PCBots = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  var BOMB_WEIGHT = { 9: 1, 10: 2, 11: 3 }; // BOMB < STFLUSH < ROCKET (held back)
+
+  function unique(list) {
+    var seen = {}, out = [];
+    list.forEach(function (x) { if (!seen[x]) { seen[x] = true; out.push(x); } });
+    return out;
+  }
+  function rankCounts(hand) {
+    var m = {};
+    hand.forEach(function (c) { m[c.r] = (m[c.r] || 0) + 1; });
+    return m;
+  }
+  function consecutiveRuns(ranks, minLen) {
+    ranks = unique(ranks.slice()).sort(function (a, b) { return a - b; });
+    if (!ranks.length) return [];
+    var runs = [], cur = [ranks[0]];
+    for (var i = 1; i < ranks.length; i++) {
+      if (ranks[i] === ranks[i - 1] + 1) cur.push(ranks[i]);
+      else { if (cur.length >= minLen) runs.push(cur.slice()); cur = [ranks[i]]; }
+    }
+    if (cur.length >= minLen) runs.push(cur);
+    return runs;
+  }
+  function pickRank(hand, rank, n) {
+    return hand.filter(function (c) { return c.r === rank; }).slice(0, n || 1);
+  }
+  function without(hand, cs) {
+    var ids = {};
+    cs.forEach(function (c) { ids[c.id] = true; });
+    return hand.filter(function (c) { return !ids[c.id]; });
+  }
+
+  /* Wrap classify(): every emitted group must be a legal Guandan pattern. */
+  function mk(cards, G, level) {
+    if (!cards.length) return null;
+    var p = G.classify(cards, level);
+    return p ? { cards: cards.slice(), pattern: p } : null;
+  }
+  function addGroup(groups, g) { if (g) groups.push(g); return !!g; }
+
+  /* Arrange a full hand into legal trick-sized groups (auto "理牌").
+   * Returns { groups:[{cards,pattern,label}], singles:n }. */
+  function arrange(hand, level, G) {
+    G = G || (typeof window !== 'undefined' && window.PCGame);
+    if (!G) throw new Error('PCGame engine required');
+    level = level || 15;
+    var pool = hand.slice();
+    var groups = [];
+
+    function take(cards) {
+      if (!cards.length) return false;
+      var g = mk(cards, G, level);
+      if (!g) return false;          // never emit an illegal pattern
+      groups.push(g);
+      pool = without(pool, cards);
+      return true;
+    }
+
+    // 1) Rocket (all four jokers) — strongest, always kept.
+    var jokers = pool.filter(function (c) { return c.s === 'W'; });
+    if (jokers.length >= 4) take(jokers.slice(0, 4));
+
+    // 2) Natural bombs (4 of one rank) — never break them up.
+    var cnt = rankCounts(pool);
+    Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+      var have = pickRank(pool, r, 4);
+      if (have.length === 4) take(have);
+    });
+
+    // 3) Straight flushes (same suit, 5+ consecutive 3..A) before plain runs.
+    ['S', 'H', 'C', 'D'].forEach(function (suit) {
+      var sc = pool.filter(function (c) { return c.s === suit && c.r >= 3 && c.r <= 14; });
+      consecutiveRuns(sc.map(function (c) { return c.r; }), 5).forEach(function (run) {
+        var cs = [];
+        run.forEach(function (r) { var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c); });
+        take(cs);
+      });
+    });
+
+    // 4) Plain straights (5+ consecutive ranks; one card per rank).
+    var runs = consecutiveRuns(Object.keys(rankCounts(pool)).map(Number).filter(function (r) {
+      return r >= 3 && r <= 14;
+    }), 5);
+    runs.forEach(function (run) {
+      var cs = [];
+      run.forEach(function (r) { var c = pickRank(pool, r, 1)[0]; if (c) cs.push(c); });
+      take(cs);
+    });
+
+    // 5) Double straights (3+ consecutive pairs) — fold loose pairs away.
+    var cnt5 = rankCounts(pool);
+    var pairRanks = Object.keys(cnt5).map(Number).filter(function (r) { return cnt5[r] >= 2 && r <= 14; });
+    consecutiveRuns(pairRanks, 3).forEach(function (run) {
+      var cs = [];
+      run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 2)); });
+      take(cs);
+    });
+
+    // 6) Triple straights / 钢板 (2+ consecutive triples).
+    var cnt6 = rankCounts(pool);
+    var tripRanks = Object.keys(cnt6).map(Number).filter(function (r) { return cnt6[r] >= 3 && r <= 14; });
+    consecutiveRuns(tripRanks, 2).forEach(function (run) {
+      var cs = [];
+      run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 3)); });
+      take(cs);
+    });
+
+    // 7) Triple-with-pair (三带二): use the LOWEST available pair as kicker to
+    //    shed small singles. Repeat while possible.
+    var guard = 0;
+    while (guard++ < 14) {
+      var c = rankCounts(pool);
+      var trips = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 3 && r <= 15; })
+        .sort(function (a, b) { return a - b; });
+      var pairs = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 2 && r <= 15; })
+        .sort(function (a, b) { return a - b; });
+      var done = false;
+      for (var t = 0; t < trips.length && !done; t++) {
+        for (var p = 0; p < pairs.length; p++) {
+          if (pairs[p] === trips[t]) continue;
+          var three = pickRank(pool, trips[t], 3), two = pickRank(pool, pairs[p], 2);
+          if (three.length === 3 && two.length === 2 && take(three.concat(two))) { done = true; break; }
+        }
+      }
+      if (!done) break;
+    }
+
+    // 8) Remaining pairs, then triples, then single cards.
+    var cnt8 = rankCounts(pool);
+    Object.keys(cnt8).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+      if (cnt8[r] >= 2) take(pickRank(pool, r, 2));
+    });
+    var cnt9 = rankCounts(pool);
+    Object.keys(cnt9).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+      if (cnt9[r] >= 3) take(pickRank(pool, r, 3));
+    });
+    pool.forEach(function (c) { take([c]); });
+
+    return {
+      groups: groups,
+      singles: groups.filter(function (g) { return g.pattern.type === 1; }).length
+    };
+  }
+
+  /* Flatten an arrangement back into a display order (理牌后的手牌顺序). */
+  function sortedHand(hand, level, G) {
+    var arranged = arrange(hand, level, G);
+    var out = [], seen = {};
+    arranged.groups.forEach(function (g) {
+      g.cards.forEach(function (c) { out.push(c); seen[c.id] = true; });
+    });
+    hand.forEach(function (c) { if (!seen[c.id]) out.push(c); });
+    return out;
+  }
+
+  /* All legal candidate plays from a hand: the arranged groups (kept intact)
+   * plus low singles/pairs/triples so the bot can answer any trick type. */
+  function candidates(hand, level, G) {
+    var arranged = arrange(hand, level, G);
+    var out = arranged.groups.slice();
+    var seen = {};
+    out.forEach(function (g) { seen[g.cards.map(function (c) { return c.id; }).sort().join(',')] = true; });
+    function maybe(cs) {
+      if (!cs.length) return;
+      var k = cs.map(function (c) { return c.id; }).sort().join(',');
+      if (seen[k]) return;
+      var g = mk(cs, G, level);
+      if (g) { seen[k] = true; out.push(g); }
+    }
+    var cnt = rankCounts(hand);
+    Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+      var one = pickRank(hand, r, 1);
+      maybe(one);                       // lowest single of this rank
+      if (cnt[r] >= 2) maybe(pickRank(hand, r, 2));
+      if (cnt[r] >= 3) maybe(pickRank(hand, r, 3));
+    });
+    return out;
+  }
+
+  function isBomb(g) { return !!BOMB_WEIGHT[g.pattern.type]; }
+
+  /* Decide a move. ctx: { hand, tablePattern (null when leading), level }.
+   * Returns { cards, pattern, name } to play, or null to PASS. */
+  function chooseMove(ctx, G) {
+    G = G || (typeof window !== 'undefined' && window.PCGame);
+    if (!G) throw new Error('PCGame engine required');
+    var level = ctx.level || 15;
+    var table = ctx.tablePattern || null;
+    var cands = candidates(ctx.hand, level, G);
+    if (!cands.length) return null;
+
+    if (!table) {
+      // Lead: 情况不明，对子先行 — otherwise shed the most cards cheaply.
+      var pairs = cands.filter(function (g) { return g.pattern.type === G.TYPE.PAIR && !isBomb(g); });
+      var pool = pairs.length ? pairs : cands.filter(function (g) { return !isBomb(g); });
+      if (!pool.length) pool = cands;
+      pool.sort(function (a, b) {
+        return a.pattern.rank - b.pattern.rank || b.cards.length - a.cards.length;
+      });
+      var lead = pool[0];
+      return { cards: lead.cards, pattern: lead.pattern, name: lead.pattern.name };
+    }
+
+    var answers = cands.filter(function (g) { return G.canBeat(g.pattern, table, level); });
+    if (!answers.length) return null;   // cannot beat -> pass
+    // Smallest legal answer first; among equals prefer shedding more cards;
+    // bombs are sorted last (hold the big guns back) unless they are the only
+    // legal answer, which the filter above already guarantees is acceptable.
+    answers.sort(function (a, b) {
+      return (BOMB_WEIGHT[a.pattern.type] || 0) - (BOMB_WEIGHT[b.pattern.type] || 0) ||
+        a.pattern.rank - b.pattern.rank || b.cards.length - a.cards.length;
+    });
+    var best = answers[0];
+    return { cards: best.cards, pattern: best.pattern, name: best.pattern.name };
+  }
+
+  return { arrange: arrange, sortedHand: sortedHand, candidates: candidates, chooseMove: chooseMove };
+});
+
+</script>
+<script>
 /* Copyright (c) 2026 CJS flshw@126.com — Private Chatroom game transport. */
 'use strict';
 /*
@@ -1336,6 +1588,13 @@ window.PCMedia = function (ctx) {
 window.PCGameClient = (function () {
   var P = window.PCProtocol;
 
+  /* Test partners: deterministic virtual seats so every client computes the
+   * same roster. They are NOT server members and hold no keys — the host keeps
+   * their hands in plaintext locally and drives their moves over the E2EE game
+   * channel, so the server still sees ciphertext only. */
+  var BOT_SIDS = ['bot_1', 'bot_2', 'bot_3'];
+  var BOT_NICKS = ['🤖 牌手1', '🤖 牌手2', '🤖 牌手3'];
+
   function create(ctx) {
     var self = {};
     var config = ctx.config, mySid = ctx.mySid, uk = ctx.uk;
@@ -1344,6 +1603,13 @@ window.PCGameClient = (function () {
     var sendControl = ctx.sendControl || function () {}; // raw server control frames
     var toast = ctx.toast || function () {};
     var onUpdate = ctx.onUpdate || function () {};
+    var botsEnabled = !!ctx.bots;        // deluxe only; simple edition has none
+    var botTimer = null;                 // scheduler for the local bot's next move
+    var botThinkingMs = 650;             // small delay so humans can follow along
+
+    function isBotSid(sid) { return BOT_SIDS.indexOf(sid) !== -1; }
+    function botNick(sid) { var i = BOT_SIDS.indexOf(sid); return i < 0 ? '机器人' : BOT_NICKS[i]; }
+    function clearBotTimer() { if (botTimer) { clearTimeout(botTimer); botTimer = null; } }
 
     var state = {
       level: 15,                      // start at 2
@@ -1366,6 +1632,8 @@ window.PCGameClient = (function () {
       pendingForMe: null,             // a pending request where I am the target
       watchTargetSid: null,          // the one player I am watching
       targetHand: [],                // target's hand, decrypted for me as observer
+      bots: [],                      // virtual bot seats [{sid,nickname,isBot,isMe:false,ukPub:null}]
+      botHands: {},                  // HOST ONLY: botSid -> plaintext cards (never leaves host)
       log: []
     };
 
@@ -1378,17 +1646,51 @@ window.PCGameClient = (function () {
     }
     function note(text) { state.log.push(text); if (state.log.length > 40) state.log.shift(); onUpdate(state); }
 
-    /* Recompute seats from verified member list; lowest sid = host.
+    /* Verified humans plus locally-injected bots. Bots fill the table up to
+     * four while humans < 4, and disappear as real players arrive. Humans are
+     * always ordered before bots so seat 0 (the deal host) is a real person. */
+    function allRoster() {
+      var humans = members.all().slice().sort(function (a, b) { return a.sid.localeCompare(b.sid); });
+      var roster = humans.slice();
+      // Bots are single-player TEST STANDS-INS: exactly one real member in the
+      // room => fill three bots so a solo tester can play 4-seat Guandan. As
+      // soon as a second human joins, ALL bots step aside for the real players.
+      // While a match is live the bot set is frozen so a mid-round join cannot
+      // shuffle the seated players; the change applies from the next match.
+      var wantBots = botsEnabled && humans.length === 1;
+      if ((state.phase === 'playing' || state.phase === 'dealing') && state.bots.length) {
+        wantBots = true; // keep current bots until this round finishes
+      }
+      var next = [];
+      if (wantBots) {
+        for (var i = 0; i < BOT_SIDS.length; i++) {
+          next.push({ sid: BOT_SIDS[i], nickname: BOT_NICKS[i],
+            isBot: true, isMe: false, ukPub: null });
+        }
+      }
+      state.bots = next;
+      if (next.length) roster = roster.concat(next);
+      return roster;
+    }
+
+    function poolMember(sid) {
+      var m = members.get(sid);
+      if (m) return m;
+      for (var i = 0; i < state.bots.length; i++) if (state.bots[i].sid === sid) return state.bots[i];
+      return null;
+    }
+
+    /* Recompute seats from verified member list + bots; lowest sid = host.
      * An approved observer does not take a seat; being watched does not. */
     function syncSeats() {
-      var all = members.all().slice().sort(function (a, b) { return a.sid.localeCompare(b.sid); });
-      var pool = all;
+      var roster = allRoster();
+      var pool = roster;
       if (state.players && state.players.length === 4) {
-        pool = state.players.map(function (sid) { return members.get(sid); }).filter(Boolean);
+        pool = state.players.map(function (sid) { return poolMember(sid); }).filter(Boolean);
       }
       if (state.spectator) pool = pool.filter(function (m) { return m.sid !== mySid; });
       state.seats = pool.slice(0, 4).map(function (m) {
-        return { sid: m.sid, nickname: m.nickname, isMe: m.sid === mySid };
+        return { sid: m.sid, nickname: m.nickname, isBot: !!m.isBot, isMe: m.sid === mySid };
       });
       state.mySeat = seatOfSid(mySid);
       state.hostSid = state.seats.length ? state.seats[0].sid : null;
@@ -1401,11 +1703,15 @@ window.PCGameClient = (function () {
       if (!ids || ids.length !== 4) return false;
       var seen = {}, list = [];
       ids.forEach(function (sid) {
-        if (!sid || seen[sid] || !members.get(sid)) return;
+        if (!sid || seen[sid] || !poolMember(sid)) return;
         seen[sid] = true; list.push(sid);
       });
       if (list.length !== 4) return false;
-      list.sort(function (a, b) { return a.localeCompare(b); });
+      // Real humans first (lowest sid = deal host), then bots in fixed order.
+      list.sort(function (a, b) {
+        var ba = isBotSid(a) ? 1 : 0, bb = isBotSid(b) ? 1 : 0;
+        return ba - bb || a.localeCompare(b);
+      });
       state.players = list;
       syncSeats(); onUpdate(state);
       return true;
@@ -1418,8 +1724,15 @@ window.PCGameClient = (function () {
       var deck = window.PCGame.makeDeck();
       var hands = window.PCGame.deal(deck);
       var wrapped = {};
+      state.botHands = {};
       for (var i = 0; i < 4; i++) {
         var seat = state.seats[i];
+        // Bot seats have no public key: the HOST keeps their cards in plaintext
+        // locally and drives their moves. No bot hand ever leaves the host.
+        if (seat.isBot) {
+          state.botHands[seat.sid] = window.PCBots.sortedHand(hands[i], state.level, window.PCGame);
+          continue;
+        }
         var m = members.get(seat.sid);
         if (!m) return null;
         var K = window.PCCrypto.randomBytes(32);
@@ -1452,6 +1765,7 @@ window.PCGameClient = (function () {
       }
       return { kind: 'deal', round: state.roundNo, level: state.level, hands: wrapped,
         host: mySid, order: state.seats.map(function (s) { return s.sid; }),
+        bots: state.seats.filter(function (s) { return s.isBot; }).map(function (s) { return s.sid; }),
         watchTargetOf: (function () {
           var m = {};
           for (var z = 0; z < state.spectate.length; z++) {
@@ -1468,8 +1782,9 @@ window.PCGameClient = (function () {
       state.level = msg.level;
       state.hostSid = msg.host;
       state.phase = 'playing';
-      state.table = null; state.passes = 0; state.finishOrder = []; state.log = [];
-      state.played = [];
+      state.table = null; state.tablePattern = null; state.passes = 0;
+      state.finishOrder = []; state.log = []; state.played = [];
+      state.botHands = state.botHands || {};
       if (msg.order && msg.order.length === 4) state.players = msg.order.slice();
       syncSeats();
       if (state.spectator) {
@@ -1503,6 +1818,7 @@ window.PCGameClient = (function () {
       }
       state.turn = (msg.order && msg.order[0]) || state.turn;
       onUpdate(state);
+      scheduleBot();
     }
 
     async function openDealForLate(msg) {
@@ -1589,6 +1905,7 @@ window.PCGameClient = (function () {
         advanceTurn(msg.by);
       }
       onUpdate(state);
+      scheduleBot();
     }
 
     function advanceTurn(fromSid) {
@@ -1599,6 +1916,52 @@ window.PCGameClient = (function () {
       }
       state.lastWinner = fromSid;
       onUpdate(state);
+      scheduleBot();
+    }
+
+    /* --- local bot driver (host only) ---
+     * Only the deal host owns bot hands. When the turn lands on a bot seat, it
+     * arranges/decides with PCBots and publishes the move through the SAME E2EE
+     * game channel. Every player receives the broadcast and applies onPlay /
+     * onPass, so seats, table and card counter stay in sync everywhere. */
+    function scheduleBot() {
+      clearBotTimer();
+      if (!botsEnabled || !isHost() || state.phase !== 'playing' || state.spectator) return;
+      var sid = state.turn;
+      if (!sid || !isBotSid(sid)) return;
+      if (!state.botHands || !state.botHands[sid] || !state.botHands[sid].length) return;
+      botTimer = setTimeout(function () { botTimer = null; botStep(sid); }, botThinkingMs);
+    }
+
+    function botStep(sid) {
+      // Re-validate after the think delay: state may have moved on.
+      if (!isHost() || state.phase !== 'playing' || state.spectator || state.turn !== sid) return;
+      var hand = state.botHands[sid];
+      if (!hand || !hand.length) return;
+      var move = null;
+      try {
+        move = window.PCBots.chooseMove({
+          hand: hand, tablePattern: state.tablePattern || null, level: state.level
+        }, window.PCGame);
+      } catch (e) { move = null; }
+      if (!move) {
+        // Cannot beat the table -> pass (legal whenever there is a table).
+        sendGame({ kind: 'pass', round: state.roundNo, by: sid });
+        return;
+      }
+      var ids = {};
+      move.cards.forEach(function (c) { ids[c.id] = true; });
+      state.botHands[sid] = hand.filter(function (c) { return !ids[c.id]; });
+      sendGame({ kind: 'play', round: state.roundNo, by: sid,
+        cards: move.cards.map(function (c) { return { s: c.s, r: c.r, id: c.id }; }),
+        pattern: { type: move.pattern.type, rank: move.pattern.rank, len: move.pattern.len },
+        bot: true });
+      // Bot finished its cards -> announce so team scoring can resolve.
+      if (!state.botHands[sid].length) {
+        var order = state.finishOrder.slice();
+        if (order.indexOf(sid) === -1) order.push(sid);
+        sendGame({ kind: 'finished', round: state.roundNo, by: sid, order: order });
+      }
     }
 
     function rankName(r) {
@@ -1724,6 +2087,10 @@ window.PCGameClient = (function () {
       return s ? s.nickname : '玩家';
     };
     self.rankName = rankName;
+    self.botsEnabled = botsEnabled;
+    self.isBotSid = isBotSid;
+    self.botNick = botNick;
+    self.roster = allRoster;      // real members + auto-filled bots (for seat picker)
     return self;
   }
 
@@ -2353,50 +2720,32 @@ window.PCDeluxe = (function () {
     return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
   }
 
-  /* --- IndexedDB: persist UK private key per room, never upload it --- */
-  var DB_NAME = 'pc_keys';
-  function openDb() {
-    return new Promise(function (resolve, reject) {
-      var req = indexedDB.open(DB_NAME, 1);
-      req.onupgradeneeded = function () {
-        var db = req.result;
-        if (!db.objectStoreNames.contains('uk')) db.createObjectStore('uk');
-      };
-      req.onsuccess = function () { resolve(req.result); };
-      req.onerror = function () { reject(req.error); };
-    });
-  }
+  /* --- localStorage: persist UK private key per room, never upload it ---
+   * The client is a local single file (file://). In Chromium, IndexedDB.open()
+   * on a file:// origin can stay pending forever, and the forge key object
+   * returned by generateUK() cannot be structured-cloned (DataCloneError).
+   * Both made the UK never persist, so F5 fell back to the login gate.
+   * Plain PEM strings in localStorage work everywhere and are enough: every
+   * crypto call reimports the PEM and never uses the cached kp object. */
+  function ukStoreKey(roomId) { return 'pc_uk_' + roomId; }
   async function loadUK(roomId) {
     try {
-      var db = await openDb();
-      return await new Promise(function (resolve, reject) {
-        var tx = db.transaction('uk', 'readonly');
-        var req = tx.objectStore('uk').get(roomId);
-        req.onsuccess = function () { resolve(req.result || null); };
-        req.onerror = function () { reject(req.error); };
-      });
+      var raw = localStorage.getItem(ukStoreKey(roomId));
+      if (!raw) return null;
+      var obj = JSON.parse(raw);
+      if (!obj || !obj.privatePem || !obj.publicPem) return null;
+      return { privatePem: obj.privatePem, publicPem: obj.publicPem, pubB64: obj.pubB64 || '' };
     } catch (e) { return null; }
   }
   async function saveUK(roomId, uk) {
     try {
-      var db = await openDb();
-      await new Promise(function (resolve, reject) {
-        var tx = db.transaction('uk', 'readwrite');
-        tx.objectStore('uk').put(uk, roomId);
-        tx.oncomplete = function () { resolve(); };
-        tx.onerror = function () { reject(tx.error); };
-      });
-    } catch (e) { /* noop */ }
+      localStorage.setItem(ukStoreKey(roomId), JSON.stringify({
+        privatePem: uk.privatePem, publicPem: uk.publicPem, pubB64: uk.pubB64 || ''
+      }));
+    } catch (e) { /* storage disabled: the session survives until refresh only */ }
   }
   async function clearUK(roomId) {
-    try {
-      var db = await openDb();
-      await new Promise(function (resolve) {
-        var tx = db.transaction('uk', 'readwrite');
-        tx.objectStore('uk').delete(roomId);
-        tx.oncomplete = function () { resolve(); };
-      });
-    } catch (e) { /* noop */ }
+    try { localStorage.removeItem(ukStoreKey(roomId)); } catch (e) { /* noop */ }
     try { localStorage.removeItem('pc_msgs_' + roomId); } catch (e) { /* noop */ }
   }
 
@@ -2419,9 +2768,9 @@ window.PCDeluxe = (function () {
     // Preload a persisted UK for this room (refresh reuse).
     var cached = await loadUK(state.config.roomId);
     if (cached) state.uk = cached;
-    // Deluxe: F5 re-enters with the same local key + nickname, no gate click.
+    // F5 re-enters with the same local key + nickname, no gate click.
     var nick = savedNickname();
-    if (isDeluxe() && cached && nick) {
+    if (cached && nick) {
       $('nickname').value = nick;
       status('gate-status', '正在恢复房间会话…');
       enter();
@@ -2604,7 +2953,10 @@ window.PCDeluxe = (function () {
     });
     try { $('safety-code').textContent = '安全码 ' + PCMembers.safetyCode(); } catch (e) {}
     if (window.PCDeluxe && window.PCDeluxe.onMembers) {
-      window.PCDeluxe.onMembers(PCMembers.all(), state.mySid);
+      // Deluxe seat picker sees the auto-filled bot roster (real members +
+      // local bots) so a solo tester can start a 4-seat Guandan match.
+      var roster = game && game.roster ? game.roster() : PCMembers.all();
+      window.PCDeluxe.onMembers(roster, state.mySid);
     }
   }
 
@@ -2646,6 +2998,7 @@ window.PCDeluxe = (function () {
     if (window.PCGameClient && window.PCDeluxe && window.PCDeluxe.bind) {
       game = window.PCGameClient.create({
         config: state.config, mySid: state.mySid, uk: state.uk, members: PCMembers,
+        bots: isDeluxe(),   // deluxe auto-fills up to 4 seats with local bots for testing
         sendGame: function (obj) { return sendKind(JSON.stringify(obj), 'game'); },
         sendControl: function (frame) { if (net) net.send(frame); },
         toast: toast,
@@ -2678,6 +3031,29 @@ window.PCDeluxe = (function () {
     $('btn-send').disabled = true;
     clearNickname();
     clearUK(state.config.roomId).then(function () { /* local plaintext cleared */ });
+  }
+
+  /* Voluntary leave: wipe local credentials so a refresh will NOT auto-rejoin,
+   * tear down every transport, and return to the nickname gate. */
+  function leaveRoom() {
+    if (!state.joined && !entering) { show('gate'); return; }
+    if (!window.confirm('确定退出当前聊天室吗？\n退出后本机密钥会被清除，下次进入需重新输入昵称。')) return;
+    state.expired = false;
+    if (countdown) { clearInterval(countdown); countdown = null; }
+    if (media) { try { if (media.inCall()) media.hangup(); } catch (e) {} media = null; }
+    if (window.PCDeluxe && window.PCDeluxe.pipClear) window.PCDeluxe.pipClear();
+    if (net) { net.close(); net = null; }
+    game = null;
+    state.joined = false; state.mySid = null; state.seq = 0; state.uk = null;
+    state.messages = []; entering = false;
+    $('messages').innerHTML = '';
+    $('input').value = ''; $('input').disabled = false; $('btn-send').disabled = false;
+    var gp = $('game-panel'); if (gp) gp.classList.add('hidden');
+    var mp = $('members-panel'); if (mp) mp.classList.add('hidden');
+    $('nickname').value = '';
+    clearNickname(); clearUK(state.config.roomId);
+    show('gate');
+    $('nickname').focus();
   }
 
   function isDeluxe() { return !!(window.PCDeluxe && window.PCDeluxe.pipAddVideo); }
@@ -2719,6 +3095,7 @@ window.PCDeluxe = (function () {
   $('btn-voice').addEventListener('click', function () { if (media) media.recordVoice(); });
   $('btn-video').addEventListener('click', function () { if (media) media.startCall(); });
   $('btn-hangup').addEventListener('click', function () { if (media) media.hangup(); });
+  $('btn-exit').addEventListener('click', leaveRoom);
 
   boot();
 })();
