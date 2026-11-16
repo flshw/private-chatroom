@@ -235,6 +235,13 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
       bob.sid, bobUk.privatePem, senderEntry ? senderEntry.ukPub : broadcast.senderPub);
   } catch (e) { decErr = e.message; }
   check('成员 B 解封装 + 解密 + 验签得到原文', decrypted === plaintext, decErr);
+  /* Seq is per sender session: B's first message must also be seq=1. */
+  const membersForB = Array.from(bob.members.values()).map(x => ({ sid: x.sid, ukPub: x.ukPub }));
+  const bFrame = buildFrame(cfg, bobUk, bob.sid, 1, Date.now(), '成员 B 的第一条消息', membersForB);
+  bob.ws.send(JSON.stringify(bFrame));
+  await new Promise(r => setTimeout(r, 250));
+  check('第二名成员 seq=1 不被误判为重放',
+    alice.messages.length === 2 && bob.errors.indexOf(P.ERR.REPLAY) === -1);
   check('服务端库中没有明文（仅密文字段）', (function () {
     const dbFile = path.join(DATA_DIR, 'private-chat.db');
     if (!fs.existsSync(dbFile)) return false;
@@ -247,10 +254,11 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
     c !== P.ERR.SPECTATE_NOT_TARGET).length === 0 && bob.errors.length === 0);
 
   /* replay rejected */
+  const beforeReplay = bob.messages.length;
   alice.ws.send(JSON.stringify(frame)); // duplicate seq=1
   await new Promise(r => setTimeout(r, 200));
   check('重放相同 seq 被服务端拒绝', alice.errors.indexOf(P.ERR.REPLAY) !== -1 &&
-    bob.messages.length === 1);
+    bob.messages.length === beforeReplay);
 
   /* complete wrap set required: craft a frame missing Bob's wrap */
   const badFrame = buildFrame(cfg, aliceUk, alice.sid, 2, Date.now(), '故意漏封装',

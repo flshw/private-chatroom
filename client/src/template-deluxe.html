@@ -55,24 +55,30 @@
 
   <div id="game-panel" class="hidden">
     <div id="card-counter"><span class="cc-title">记牌器 · 剩余</span></div>
-    <div id="game-setup" class="hidden">
-      <div class="setup-title">选择另外 3 名玩家后开局（选定后按房间内固定座次发牌）</div>
-      <div id="player-picks"></div>
-    </div>
     <div class="game-top">
       <span class="title">🃏 掼蛋</span>
       <span class="level" id="game-level">打 2</span>
       <span class="spacer"></span>
-      <button class="tool-btn" id="btn-game-start">开局（0/3）</button>
-      <button class="tool-btn" id="btn-game-pass">过牌</button>
-      <button class="tool-btn" id="btn-game-play">出牌</button>
     </div>
     <div id="spectator-note" class="spectator-note hidden"></div>
     <div class="game-seats" id="game-seats"></div>
-    <div class="game-table" id="game-table"><div class="tip">点击「开局」开始</div></div>
+    <div class="game-table" id="game-table"><div class="tip">点击「掼蛋」选择玩家后开局</div></div>
     <div class="my-hand" id="my-hand"></div>
-    <div class="game-actions"><span style="font-size:11px;color:var(--muted)">点选手牌后点「出牌」，牌局数据全程端到端加密</span></div>
+    <div class="game-actions"><span style="font-size:11px;color:var(--muted)">点选手牌后点下方「出牌」，牌局数据全程端到端加密</span></div>
     <div class="game-log" id="game-log"></div>
+    <div class="game-bottom">
+      <button class="tool-btn" id="btn-game-pass">过牌</button>
+      <button class="tool-btn" id="btn-game-play">出牌</button>
+    </div>
+  </div>
+  <div id="game-setup-mask" class="hidden"></div>
+  <div id="game-setup" class="hidden">
+    <div class="setup-title">选择另外 3 名玩家（已按人数规则预选，点击可调整）</div>
+    <div id="player-picks"></div>
+    <div class="setup-foot">
+      <button class="tool-btn" id="btn-game-start">开局（0/3）</button>
+      <button class="tool-btn" id="btn-setup-close">取消</button>
+    </div>
   </div>
 </div>
 

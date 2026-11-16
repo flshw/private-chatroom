@@ -141,12 +141,16 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   border:1px solid var(--line);border-radius:6px;padding:2px 5px;min-width:34px;text-align:center}
 .cc-rank b{color:var(--brand);font-weight:700}
 .cc-rank.zero{opacity:.35;text-decoration:line-through}
-/* Pre-game seat picker: exactly three other members. */
-#game-setup{padding:8px 10px;margin-bottom:8px;border:1px solid var(--brand2);border-radius:10px;
-  background:rgba(91,140,255,.08)}
-#game-setup.hidden{display:none}
-.setup-title{font-size:11.5px;color:#c9bdff;margin-bottom:6px}
-#player-picks{display:flex;flex-wrap:wrap;gap:6px}
+/* Pre-game seat picker: modal window with a dimmed backdrop. */
+#game-setup-mask{position:fixed;inset:0;z-index:94;background:rgba(4,7,16,.62);backdrop-filter:blur(2px)}
+#game-setup{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:95;
+  display:flex;flex-direction:column;gap:10px;min-width:300px;max-width:90vw;padding:18px;
+  background:linear-gradient(160deg,#1b2440,#141a30);border:1px solid var(--brand2);
+  border-radius:16px;box-shadow:var(--shadow)}
+#game-setup-mask.hidden,#game-setup.hidden{display:none}
+.setup-title{font-size:12px;color:#c9bdff;line-height:1.5}
+#player-picks{display:flex;flex-wrap:wrap;gap:6px;min-height:32px}
+.setup-foot{display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--line);padding-top:10px}
 .player-chip{border:1px solid var(--line);background:rgba(20,27,46,.9);color:var(--ink);
   border-radius:8px;padding:5px 9px;font-size:12px;cursor:pointer}
 .player-chip:hover{border-color:var(--brand)}
@@ -175,6 +179,8 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
 .my-hand{display:flex;flex-wrap:wrap;gap:4px;padding:10px 0;justify-content:center;max-height:150px;overflow:auto}
 .game-actions{display:flex;gap:8px;justify-content:center;padding-bottom:4px;flex-wrap:wrap}
 .game-log{max-height:70px;overflow:auto;color:var(--muted);font-size:11.5px;line-height:1.6;border-top:1px solid var(--line);padding-top:6px}
+.game-bottom{display:flex;gap:10px;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
+.game-bottom .tool-btn{min-width:92px;text-align:center}
 .spectator-note{font-size:12px;color:#ffcf7a;border:1px solid #6b5326;background:rgba(107,83,38,.15);border-radius:8px;padding:6px 10px}
 /* One-to-one spectator: consent box + target picker. */
 .spectate-consent{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;padding:8px 10px;
@@ -243,24 +249,30 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
 
   <div id="game-panel" class="hidden">
     <div id="card-counter"><span class="cc-title">记牌器 · 剩余</span></div>
-    <div id="game-setup" class="hidden">
-      <div class="setup-title">选择另外 3 名玩家后开局（选定后按房间内固定座次发牌）</div>
-      <div id="player-picks"></div>
-    </div>
     <div class="game-top">
       <span class="title">🃏 掼蛋</span>
       <span class="level" id="game-level">打 2</span>
       <span class="spacer"></span>
-      <button class="tool-btn" id="btn-game-start">开局（0/3）</button>
-      <button class="tool-btn" id="btn-game-pass">过牌</button>
-      <button class="tool-btn" id="btn-game-play">出牌</button>
     </div>
     <div id="spectator-note" class="spectator-note hidden"></div>
     <div class="game-seats" id="game-seats"></div>
-    <div class="game-table" id="game-table"><div class="tip">点击「开局」开始</div></div>
+    <div class="game-table" id="game-table"><div class="tip">点击「掼蛋」选择玩家后开局</div></div>
     <div class="my-hand" id="my-hand"></div>
-    <div class="game-actions"><span style="font-size:11px;color:var(--muted)">点选手牌后点「出牌」，牌局数据全程端到端加密</span></div>
+    <div class="game-actions"><span style="font-size:11px;color:var(--muted)">点选手牌后点下方「出牌」，牌局数据全程端到端加密</span></div>
     <div class="game-log" id="game-log"></div>
+    <div class="game-bottom">
+      <button class="tool-btn" id="btn-game-pass">过牌</button>
+      <button class="tool-btn" id="btn-game-play">出牌</button>
+    </div>
+  </div>
+  <div id="game-setup-mask" class="hidden"></div>
+  <div id="game-setup" class="hidden">
+    <div class="setup-title">选择另外 3 名玩家（已按人数规则预选，点击可调整）</div>
+    <div id="player-picks"></div>
+    <div class="setup-foot">
+      <button class="tool-btn" id="btn-game-start">开局（0/3）</button>
+      <button class="tool-btn" id="btn-setup-close">取消</button>
+    </div>
   </div>
 </div>
 
@@ -1917,7 +1929,7 @@ window.PC3D = (function () {
  */
 window.PCDeluxe = (function () {
   var game = null, ctx = null, voiceOn = false, selected = {};
-  var membersList = [], mySid = null, picked = [];
+  var membersList = [], mySid = null, picked = [], setupOpen = false;
   var $ = function (id) { return document.getElementById(id); };
 
   function bind(o) {
@@ -1944,8 +1956,7 @@ window.PCDeluxe = (function () {
       btn.title = enough ? '选择另外 3 名玩家后开局' :
         ('房间内至少 4 人才能开局（当前 ' + membersList.length + ' 人）');
     }
-    var panel = $('game-panel');
-    if (panel && !panel.classList.contains('hidden')) renderSetup();
+    if (setupOpen) renderSetup();
   }
 
   function watcherMap() {
@@ -1954,6 +1965,33 @@ window.PCDeluxe = (function () {
       if (r.status === 'approved') out[r.spectatorSid] = true;
     });
     return out;
+  }
+
+  function showSetup(open) {
+    setupOpen = !!open;
+    var box = $('game-setup'), mask = $('game-setup-mask');
+    if (box) box.classList.toggle('hidden', !setupOpen);
+    if (mask) mask.classList.toggle('hidden', !setupOpen);
+    if (setupOpen) renderSetup();
+  }
+
+  /* 4 in room -> pick the other three; more than 4 -> random three. */
+  function autoPick() {
+    var watching = watcherMap();
+    var cands = membersList.filter(function (m) {
+      return m.sid !== mySid && !watching[m.sid];
+    }).map(function (m) { return m.sid; });
+    if (membersList.length === 4) {
+      picked = cands.slice(0, 3);
+    } else if (membersList.length > 4) {
+      for (var i = cands.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = cands[i]; cands[i] = cands[j]; cands[j] = tmp;
+      }
+      picked = cands.slice(0, 3);
+    } else {
+      picked = [];
+    }
   }
 
   /* Exactly one other seat per click, up to three. */
@@ -2034,8 +2072,7 @@ window.PCDeluxe = (function () {
     var seats = $('game-seats'), table = $('game-table'), hand = $('my-hand'), log = $('game-log');
     if (!seats || !table || !hand) return;
     if (!$('game-panel') || $('game-panel').classList.contains('hidden')) return;
-    var setup = $('game-setup');
-    if (setup) setup.classList.toggle('hidden', st.phase === 'playing' || st.phase === 'dealing' || !!st.spectator);
+    if (st.phase === 'playing' || st.phase === 'dealing' || st.spectator) showSetup(false);
     renderCounter(st);
     // Seats
     seats.innerHTML = '';
@@ -2106,15 +2143,14 @@ window.PCDeluxe = (function () {
     var opening = p.classList.contains('hidden');
     p.classList.toggle('hidden');
     if (opening) {
-      if (!picked.length && game && game.state.players &&
-          (game.state.phase === 'idle' || game.state.phase === 'finished')) {
-        var watching = watcherMap();
-        picked = game.state.players.filter(function (s) {
-          return s !== mySid && !watching[s] && membersList.some(function (m) { return m.sid === s; });
-        }).slice(0, 3);
-      }
-      renderSetup();
       syncSeats();
+      if (game && !game.state.spectator &&
+          (game.state.phase === 'idle' || game.state.phase === 'finished')) {
+        autoPick();
+        showSetup(true);
+      } else {
+        showSetup(false);
+      }
       if (game) renderGame(game.state);
     }
   }
@@ -2135,6 +2171,8 @@ window.PCDeluxe = (function () {
       return s !== mySid && !watching[s] && membersList.some(function (m) { return m.sid === s; });
     });
     if (!ok) { if (ctx) ctx.toast('所选玩家已离线或正在旁观，请重新选择'); renderSetup(); return; }
+    // Close the picker immediately; the deal frame will render the next round.
+    showSetup(false);
     // Everyone applies the same seat list; only the selected host deals.
     game.requestStart([mySid].concat(picked));
   }
@@ -2255,6 +2293,8 @@ window.PCDeluxe = (function () {
     $('btn-game-play') && $('btn-game-play').addEventListener('click', onPlayClick);
     $('btn-game-pass') && $('btn-game-pass').addEventListener('click', onPassClick);
     $('btn-spectate') && $('btn-spectate').addEventListener('click', requestSpectate);
+    $('btn-setup-close') && $('btn-setup-close').addEventListener('click', function () { showSetup(false); });
+    $('game-setup-mask') && $('game-setup-mask').addEventListener('click', function () { showSetup(false); });
     $('btn-voice-live') && $('btn-voice-live').addEventListener('click', toggleVoice);
     $('btn-pip-close') && $('btn-pip-close').addEventListener('click', pipClear);
     initPiPDrag();

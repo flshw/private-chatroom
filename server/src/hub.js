@@ -30,6 +30,9 @@ class Hub {
     this.byRoom = new Map();      // roomId -> Map<sid, session>
     this.memberVersion = new Map(); // roomId -> integer, monotonic
     this.rate = new Map();        // sid -> {count, windowAt}
+    /* Message seq is per SENDER SESSION, not per room. Each member starts at
+     * seq=1 when they JOIN (including an F5 reconnect with a fresh sid). */
+    this.seqBySid = new Map();    // sid -> last accepted seq
     /* One-to-one spectator relations. Each observer (keyed by ukPub, stable
      * across reconnects) watches exactly ONE target player and needs that
      * target's consent. Once created the target is locked for the room's
@@ -50,6 +53,7 @@ class Hub {
       const room = this.byRoom.get(session.roomId);
       if (room) {
         room.delete(session.sid);
+        this.seqBySid.delete(session.sid);
         if (room.size === 0) this.byRoom.delete(session.roomId);
         else this.broadcastMemberKeys(session.roomId);
       }
@@ -62,6 +66,8 @@ class Hub {
   }
 
   clearRoom(roomId) {
+    const room = this.byRoom.get(roomId);
+    if (room) for (const sid of room.keys()) this.seqBySid.delete(sid);
     this.byRoom.delete(roomId);
     this.memberVersion.delete(roomId);
     this.spectators.delete(roomId);
@@ -176,6 +182,7 @@ class Hub {
     session.selfSig = selfSig;
     session.clientTime = f.clientTime;
     map.set(sid, session);
+    this.seqBySid.set(sid, 0);
     this.db.setRoomStatus(roomId, 'active');
     this.db.audit('member_joined', roomId, now);
 
@@ -221,8 +228,9 @@ class Hub {
     if (!room || room.expires_at <= Date.now()) return this.error(session, P.ERR.ROOM_INVALID);
     if (e.roomId !== roomId || e.senderSid !== session.sid) return this.error(session, P.ERR.BAD_ENVELOPE);
     if (e.v !== P.PROTOCOL_VERSION) return this.error(session, P.ERR.BAD_VERSION);
-    // Strictly increasing seq.
-    const expected = this.db.nextSeq(roomId);
+    // Strictly increasing seq PER SENDER SESSION. A room-global counter made
+    // every second member's first message fail with E_REPLAY.
+    const expected = (this.seqBySid.get(session.sid) || 0) + 1;
     if (e.seq !== expected) return this.error(session, P.ERR.REPLAY);
     // Clock tolerance using server-corrected time.
     if (Math.abs(Number(e.ts) - Date.now()) > P.LIMITS.CLOCK_TOLERANCE_MS) {
@@ -261,6 +269,7 @@ class Hub {
     // Best-effort size guards (base64 fields already bounded by WS frame limit).
     if (!m.iv || !m.ct || !m.tag) return this.error(session, P.ERR.BAD_ENVELOPE);
     this.db.addMessage(m);
+    this.seqBySid.set(session.sid, e.seq);
     const broadcast = Object.assign({}, e, { fromSession: session.sid });
     delete broadcast.sig;
     delete broadcast.senderPub;

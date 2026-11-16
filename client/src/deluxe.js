@@ -7,7 +7,7 @@
  */
 window.PCDeluxe = (function () {
   var game = null, ctx = null, voiceOn = false, selected = {};
-  var membersList = [], mySid = null, picked = [];
+  var membersList = [], mySid = null, picked = [], setupOpen = false;
   var $ = function (id) { return document.getElementById(id); };
 
   function bind(o) {
@@ -34,8 +34,7 @@ window.PCDeluxe = (function () {
       btn.title = enough ? '选择另外 3 名玩家后开局' :
         ('房间内至少 4 人才能开局（当前 ' + membersList.length + ' 人）');
     }
-    var panel = $('game-panel');
-    if (panel && !panel.classList.contains('hidden')) renderSetup();
+    if (setupOpen) renderSetup();
   }
 
   function watcherMap() {
@@ -44,6 +43,33 @@ window.PCDeluxe = (function () {
       if (r.status === 'approved') out[r.spectatorSid] = true;
     });
     return out;
+  }
+
+  function showSetup(open) {
+    setupOpen = !!open;
+    var box = $('game-setup'), mask = $('game-setup-mask');
+    if (box) box.classList.toggle('hidden', !setupOpen);
+    if (mask) mask.classList.toggle('hidden', !setupOpen);
+    if (setupOpen) renderSetup();
+  }
+
+  /* 4 in room -> pick the other three; more than 4 -> random three. */
+  function autoPick() {
+    var watching = watcherMap();
+    var cands = membersList.filter(function (m) {
+      return m.sid !== mySid && !watching[m.sid];
+    }).map(function (m) { return m.sid; });
+    if (membersList.length === 4) {
+      picked = cands.slice(0, 3);
+    } else if (membersList.length > 4) {
+      for (var i = cands.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var tmp = cands[i]; cands[i] = cands[j]; cands[j] = tmp;
+      }
+      picked = cands.slice(0, 3);
+    } else {
+      picked = [];
+    }
   }
 
   /* Exactly one other seat per click, up to three. */
@@ -124,8 +150,7 @@ window.PCDeluxe = (function () {
     var seats = $('game-seats'), table = $('game-table'), hand = $('my-hand'), log = $('game-log');
     if (!seats || !table || !hand) return;
     if (!$('game-panel') || $('game-panel').classList.contains('hidden')) return;
-    var setup = $('game-setup');
-    if (setup) setup.classList.toggle('hidden', st.phase === 'playing' || st.phase === 'dealing' || !!st.spectator);
+    if (st.phase === 'playing' || st.phase === 'dealing' || st.spectator) showSetup(false);
     renderCounter(st);
     // Seats
     seats.innerHTML = '';
@@ -196,15 +221,14 @@ window.PCDeluxe = (function () {
     var opening = p.classList.contains('hidden');
     p.classList.toggle('hidden');
     if (opening) {
-      if (!picked.length && game && game.state.players &&
-          (game.state.phase === 'idle' || game.state.phase === 'finished')) {
-        var watching = watcherMap();
-        picked = game.state.players.filter(function (s) {
-          return s !== mySid && !watching[s] && membersList.some(function (m) { return m.sid === s; });
-        }).slice(0, 3);
-      }
-      renderSetup();
       syncSeats();
+      if (game && !game.state.spectator &&
+          (game.state.phase === 'idle' || game.state.phase === 'finished')) {
+        autoPick();
+        showSetup(true);
+      } else {
+        showSetup(false);
+      }
       if (game) renderGame(game.state);
     }
   }
@@ -225,6 +249,8 @@ window.PCDeluxe = (function () {
       return s !== mySid && !watching[s] && membersList.some(function (m) { return m.sid === s; });
     });
     if (!ok) { if (ctx) ctx.toast('所选玩家已离线或正在旁观，请重新选择'); renderSetup(); return; }
+    // Close the picker immediately; the deal frame will render the next round.
+    showSetup(false);
     // Everyone applies the same seat list; only the selected host deals.
     game.requestStart([mySid].concat(picked));
   }
@@ -345,6 +371,8 @@ window.PCDeluxe = (function () {
     $('btn-game-play') && $('btn-game-play').addEventListener('click', onPlayClick);
     $('btn-game-pass') && $('btn-game-pass').addEventListener('click', onPassClick);
     $('btn-spectate') && $('btn-spectate').addEventListener('click', requestSpectate);
+    $('btn-setup-close') && $('btn-setup-close').addEventListener('click', function () { showSetup(false); });
+    $('game-setup-mask') && $('game-setup-mask').addEventListener('click', function () { showSetup(false); });
     $('btn-voice-live') && $('btn-voice-live').addEventListener('click', toggleVoice);
     $('btn-pip-close') && $('btn-pip-close').addEventListener('click', pipClear);
     initPiPDrag();

@@ -259,11 +259,26 @@ const canonical = P.canonicalJSON;
   check('开局必须选择另外 3 名玩家',
     deluxe.indexOf('game.requestStart([mySid].concat(picked));') !== -1 &&
     deluxe.indexOf("picked.length !== 3") !== -1);
+  check('选人改为弹窗并在开局后关闭',
+    deluxe.indexOf('id="game-setup-mask"') !== -1 &&
+    deluxe.indexOf('function showSetup(open)') !== -1 &&
+    deluxe.indexOf('showSetup(false);') !== -1);
+  check('4人全选/超过4人随机选3人',
+    deluxe.indexOf('function autoPick()') !== -1 &&
+    deluxe.indexOf('membersList.length === 4') !== -1 &&
+    deluxe.indexOf('Math.random()') !== -1);
+  check('出牌/过牌按钮位于面板底部',
+    deluxe.indexOf('class="game-bottom"') !== -1 &&
+    deluxe.indexOf('id="btn-game-play"') > deluxe.indexOf('class="game-bottom"'));
   check('记牌器按已出牌实时扣减',
     deluxe.indexOf('id="card-counter"') !== -1 &&
     deluxe.indexOf('state.played.push(') !== -1 &&
     deluxe.indexOf('renderCounter(st)') !== -1);
   /* Guandan engine behaviour is covered by tools/test-guandan.js. */
+  const hubSrc = fs.readFileSync(path.join(ROOT, 'server', 'src', 'hub.js'), 'utf8');
+  check('消息 seq 按发送会话校验（多人首条不再误判重放）',
+    hubSrc.indexOf('this.seqBySid.get(session.sid)') !== -1 &&
+    hubSrc.indexOf('this.db.nextSeq(roomId)') === -1);
 
   console.log('\n=== 结果: ' + passed + ' 通过 / ' + failed + ' 失败 ===');
   process.exit(failed ? 1 : 0);
