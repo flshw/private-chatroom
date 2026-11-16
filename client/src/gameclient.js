@@ -289,7 +289,9 @@ window.PCGameClient = (function () {
     function pass() {
       if (state.phase !== 'playing' || state.spectator) return;
       if (state.turn !== mySid) { toast('还没轮到你'); return; }
-      if (!state.table) { toast('你是本轮首位，不能过牌'); return; }
+      // Guandan leader must play, but never leave the button silently dead:
+      // a tap on the lead gives an explicit hint instead of doing nothing.
+      if (!state.table) { toast('你是本轮首位领出，请先出牌（或点「自动理牌」）'); return; }
       sendGame({ kind: 'pass', round: state.roundNo, by: mySid });
     }
 

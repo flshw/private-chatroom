@@ -270,9 +270,16 @@ window.PCDeluxe = (function () {
     // Consent buttons for a pending request targeting me.
     renderConsent(st);
     var myTurn = !st.spectator && st.turn === ctx.state.mySid;
+    var inPlay = st.phase === 'playing' && !st.spectator;
     var btnPlay = $('btn-game-play'), btnPass = $('btn-game-pass');
     if (btnPlay) btnPlay.disabled = !myTurn;
-    if (btnPass) btnPass.disabled = !myTurn || !st.table;
+    // Keep 过牌 clickable for the whole match: a grey button that ignores taps
+    // is read as "broken". Clicking off-turn / on the lead now yields a clear
+    // toast from game.pass(). A dimmed style still hints when it is not ready.
+    if (btnPass) {
+      btnPass.disabled = !inPlay;
+      btnPass.classList.toggle('muted', !myTurn || !st.table);
+    }
     var btnStart = $('btn-game-start');
     if (btnStart) btnStart.classList.toggle('hidden', st.phase === 'playing' || st.spectator);
     if (log) { log.innerHTML = ''; st.log.slice(-12).forEach(function (t) {
