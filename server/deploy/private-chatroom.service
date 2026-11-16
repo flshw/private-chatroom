@@ -1,0 +1,23 @@
+[Unit]
+Description=Private Chatroom - independent E2EE chat service
+Documentation=https://gitee.com/klmycjs/private-chatroom
+After=network.target
+
+[Service]
+Type=simple
+User=chatroom
+Group=chatroom
+WorkingDirectory=/opt/private-chatroom/server
+EnvironmentFile=/etc/private-chatroom/private-chatroom.env
+ExecStart=/usr/bin/node src/main.js
+Restart=always
+RestartSec=3
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/lib/private-chatroom
+
+[Install]
+WantedBy=multi-user.target
