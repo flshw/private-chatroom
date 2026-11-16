@@ -136,13 +136,12 @@ window.PCDeluxe = (function () {
     return d;
   }
 
-  /* Order ranks the way Guandan players arrange a hand: rockets/bombs and
-   * jokers first, high cards to low, using the engine's arranged order when
-   * available. Falls back to descending rank for safety. */
+  /* Order the hand the way a player reads it (理牌): strongest rank first —
+   * jokers, level card/2, A, K … 3 — same-rank cards stacked together.
+   * Uses the engine's deterministic sortHandForView. */
   function arrangedOrder(cards, st) {
-    if (window.PCBots && window.PCGame && cards.length) {
-      try { return window.PCBots.sortedHand(cards, st.level, window.PCGame); }
-      catch (e) { /* fall through */ }
+    if (window.PCGame && window.PCGame.sortHandForView && cards.length) {
+      return window.PCGame.sortHandForView(cards, st.level);
     }
     return cards.slice().sort(function (a, b) {
       return (b.s === 'W' ? 100 + b.r : b.r) - (a.s === 'W' ? 100 + a.r : a.r);

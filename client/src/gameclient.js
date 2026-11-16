@@ -210,6 +210,7 @@ window.PCGameClient = (function () {
       state.hostSid = msg.host;
       state.phase = 'playing';
       state.table = null; state.tablePattern = null; state.passes = 0;
+      state.lastWinner = null; state._passEchoSig = null;
       state.finishOrder = []; state.log = []; state.played = [];
       state.botHands = state.botHands || {};
       if (msg.order && msg.order.length === 4) state.players = msg.order.slice();
@@ -225,7 +226,7 @@ window.PCGameClient = (function () {
             var wPlain = window.PCCrypto.aesDecrypt(wK,
               'deal|' + config.roomId + '|' + state.roundNo + '|' + watchedSid + '|' + mySid,
               w.iv, w.ct, w.tag);
-            state.targetHand = window.PCGame.sortHand(JSON.parse(wPlain).hand, state.level);
+            state.targetHand = window.PCGame.sortHandForView(JSON.parse(wPlain).hand, state.level);
             var tn = (state.seats.filter(function (s) { return s.sid === watchedSid; })[0] || {}).nickname || '玩家';
             note('旁观 ' + tn + ' 的手牌（' + state.targetHand.length + ' 张）· 打' + rankName(state.level));
           } catch (e) { note('目标手牌解封失败：' + e.message); }
@@ -239,7 +240,7 @@ window.PCGameClient = (function () {
           var K = window.PCCrypto.unwrapKey(w.wrap, uk.privatePem);
           var plain = window.PCCrypto.aesDecrypt(K,
             'deal|' + config.roomId + '|' + state.roundNo + '|' + mySid, w.iv, w.ct, w.tag);
-          state.hand = window.PCGame.sortHand(JSON.parse(plain).hand, state.level);
+          state.hand = window.PCGame.sortHandForView(JSON.parse(plain).hand, state.level);
           note('发牌完成，你拿到 ' + state.hand.length + ' 张 · 打' + rankName(state.level));
         } catch (e) { toast('手牌解封失败：' + e.message); }
       }
@@ -299,17 +300,45 @@ window.PCGameClient = (function () {
       state.table = { cards: msg.cards, type: pattern.type, bySid: mySid };
       state.tablePattern = pattern;
       state.passes = 0;
+      state.lastWinner = mySid;   // a real play (not a pass) owns the trick
       onUpdate(state);
       return true;
     }
 
     function pass() {
-      if (state.phase !== 'playing' || state.spectator) return;
-      if (state.turn !== mySid) { toast('还没轮到你'); return; }
+      if (state.phase !== 'playing' || state.spectator) return false;
+      if (state.turn !== mySid) { toast('还没轮到你'); return false; }
       // Guandan leader must play, but never leave the button silently dead:
       // a tap on the lead gives an explicit hint instead of doing nothing.
-      if (!state.table) { toast('你是本轮首位领出，请先出牌（或点「自动理牌」）'); return; }
+      if (!state.table) { toast('你是本轮首位领出，请先出牌（或点「自动理牌」）'); return false; }
+      // Optimistic local feedback — the play path already repaints on the same
+      // tick; pass() used to wait for the full E2EE round-trip so a tap looked
+      // dead. Apply locally now and ignore our own echo (signature guard) so
+      // `passes` is never counted twice.
+      state._passEchoSig = state.roundNo + '|' + mySid;
+      applyPass(mySid);
       sendGame({ kind: 'pass', round: state.roundNo, by: mySid });
+      return true;
+    }
+
+    /* Apply one pass to the local state. Shared by the optimistic local pass
+     * and by onPass() for other players' broadcasts. */
+    function applyPass(by) {
+      state.passes++;
+      var seat = seatOfSid(by);
+      note((by === mySid ? '你' : (state.seats[seat] ? state.seats[seat].nickname : '玩家')) + ' 过牌');
+      if (state.passes >= state.seats.length - 1 - state.finishOrder.length) {
+        // New trick led by the player who actually PLAYED last (lastWinner),
+        // never by the last passer. lastWinner is updated only on play().
+        state.table = null; state.tablePattern = null; state.passes = 0;
+        var leadSid = state.lastWinner || by;
+        note('新一轮，由 ' + ((state.seats[seatOfSid(leadSid)] || {}).nickname || '玩家') + ' 领出');
+        state.turn = leadSid;
+      } else {
+        advanceTurn(by);
+      }
+      onUpdate(state);
+      scheduleBot();
     }
 
     async function onPlay(msg) {
@@ -317,6 +346,7 @@ window.PCGameClient = (function () {
       state.table = { cards: msg.cards, type: pattern && pattern.type, bySid: msg.by };
       state.tablePattern = pattern;
       state.passes = 0;
+      state.lastWinner = msg.by;  // only a PLAY (never a pass) may win the trick
       (msg.cards || []).forEach(function (c) {
         if (!state.played.some(function (p) { return p.id === c.id; })) {
           state.played.push({ s: c.s, r: c.r, id: c.id });
@@ -339,19 +369,13 @@ window.PCGameClient = (function () {
     }
 
     function onPass(msg) {
-      state.passes++;
-      var seat = seatOfSid(msg.by);
-      note((msg.by === mySid ? '你' : (state.seats[seat] ? state.seats[seat].nickname : '玩家')) + ' 过牌');
-      if (state.passes >= state.seats.length - 1 - state.finishOrder.length) {
-        // New trick led by last winner.
-        state.table = null; state.tablePattern = null; state.passes = 0;
-        note('新一轮，由 ' + (state.seats[seatOfSid(state.lastWinner)] || {}).nickname + ' 领出');
-        state.turn = state.lastWinner || state.turn;
-      } else {
-        advanceTurn(msg.by);
+      // Our own optimistic pass already applied this broadcast's effect.
+      var sig = state.roundNo + '|' + msg.by;
+      if (msg.by === mySid && state._passEchoSig === sig) {
+        state._passEchoSig = null;   // consume the guard, do not double-count
+        return;
       }
-      onUpdate(state);
-      scheduleBot();
+      applyPass(msg.by);
     }
 
     function advanceTurn(fromSid) {
@@ -360,7 +384,10 @@ window.PCGameClient = (function () {
         var cand = state.seats[(i + n) % state.seats.length];
         if (state.finishOrder.indexOf(cand.sid) === -1) { state.turn = cand.sid; break; }
       }
-      state.lastWinner = fromSid;
+      // lastWinner is NOT touched here. It is updated ONLY when someone plays
+      // cards (see onPlay / optimistic play). Updating it on a pass made the
+      // next trick get led by the last PASSER instead of the last player —
+      // the root cause of "过牌后轮次乱了/像没生效".
       onUpdate(state);
       scheduleBot();
     }
@@ -541,7 +568,9 @@ window.PCGameClient = (function () {
       if (!window.PCBots || !window.PCGame) return false;
       var view = state.spectator ? state.targetHand : state.hand;
       if (!view || !view.length) return false;
-      var arranged = window.PCBots.sortedHand(view, state.level, window.PCGame);
+      var arranged = (window.PCGame && window.PCGame.sortHandForView)
+        ? window.PCGame.sortHandForView(view, state.level)
+        : window.PCBots.sortedHand(view, state.level, window.PCGame);
       if (state.spectator) state.targetHand = arranged;
       else state.hand = arranged;
       note('已自动理牌：同类牌归堆，炸弹/顺子在前');

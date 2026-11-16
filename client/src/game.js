@@ -78,6 +78,20 @@
     });
   }
 
+  /* Display / 理牌 order (sortHandForView). Human players read a hand by RANK,
+   * strongest first, with same-rank cards kept together — NOT by the bot's
+   * "fewest tricks" grouping (which used to push bombs to the front and jokers
+   * to the very end). Order: big joker, small joker, level card/2, then A..3,
+   * suit tie-break fixed so the sequence is stable across renders. */
+  var VIEW_SUIT = { S: 0, H: 1, C: 2, D: 3, W: 4 };
+  function sortHandForView(hand, level) {
+    return hand.slice().sort(function (a, b) {
+      var va = cmpVal(a.r, level), vb = cmpVal(b.r, level);
+      if (va !== vb) return vb - va;              // strongest rank first
+      return (VIEW_SUIT[a.s] - VIEW_SUIT[b.s]) || b.r - a.r;
+    });
+  }
+
   /* --- classify a set of cards with NO wilds present --- */
   function classifyNormal(cards, level) {
     var n = cards.length;
@@ -240,7 +254,7 @@
   return {
     SUITS: SUITS, TYPE: TYPE, TYPE_NAME: TYPE_NAME,
     makeDeck: makeDeck, isWild: isWild, isJoker: isJoker, cmpVal: cmpVal,
-    shuffle: shuffle, deal: deal, sortHand: sortHand,
+    shuffle: shuffle, deal: deal, sortHand: sortHand, sortHandForView: sortHandForView,
     classify: classify, classifyNormal: classifyNormal, beats: beats, canBeat: canBeat,
     levelDelta: levelDelta, isDoubleDown: isDoubleDown, canResist: canResist
   };
