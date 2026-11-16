@@ -212,6 +212,12 @@ const canonical = P.canonicalJSON;
   required.forEach(function (pair) {
     check('单文件客户端已内联 ' + pair[0], built.indexOf(pair[1]) !== -1);
   });
+  /* Constructors must be invoked with `new`; a bare call returns undefined and
+   * breaks net.start/media at runtime (the "reading 'start'" failure). */
+  check('PCNet 使用 new 构造', built.indexOf('new window.PCNet(') !== -1 &&
+    built.indexOf('= window.PCNet(') === -1);
+  check('PCMedia 使用 new 构造', built.indexOf('new window.PCMedia(') !== -1 &&
+    built.indexOf('= window.PCMedia(') === -1);
 
   console.log('\n=== 结果: ' + passed + ' 通过 / ' + failed + ' 失败 ===');
   process.exit(failed ? 1 : 0);

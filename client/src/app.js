@@ -129,7 +129,7 @@
         nickname: nickname, ukPub: state.uk.publicPem, selfSig: selfSig,
         clientTime: clientTime, nonce: PCCrypto.b64(PCCrypto.randomBytes(16))
       };
-      net = window.PCNet({
+      net = new window.PCNet({
         config: state.config,
         onOpen: function () { status('gate-status', '已连接，正在校验成员身份…', 'ok'); },
         onClose: function () { if (!state.expired) toast('连接中断，正在重连…'); },
@@ -282,7 +282,7 @@
   function enterChat() {
     show('chat');
     $('room-name').textContent = state.config.name || '私密聊天';
-    media = window.PCMedia({
+    media = new window.PCMedia({
       config: state.config, net: net,
       mySid: state.mySid, uk: state.uk,
       members: PCMembers,
