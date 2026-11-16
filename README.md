@@ -16,7 +16,7 @@
 
 本地验证结果（2026-11-16）：
 
-- `node tools/verify-pc-crypto.js`：**27 / 27 通过**
+- `node tools/verify-pc-crypto.js`：**35 / 35 通过**（含单文件客户端模块完整性检查）
 - `node tools/smoke-pc.js`：**27 / 27 通过**
 
 ## 目录结构

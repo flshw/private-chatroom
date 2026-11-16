@@ -197,6 +197,22 @@ const canonical = P.canonicalJSON;
   keyStore.deleteRoomKey(config.roomId, rk.ref);
   check('旧 RK 私钥销毁后不可再签发', keyStore.roomPrivateKey(config.roomId, rk.ref) === null);
 
+  /* --- 10. Built single-file client must inline every runtime module --- */
+  const built = fs.readFileSync(path.join(ROOT, 'client/dist/private-chat.template.html'), 'utf8');
+  const required = [
+    ['PC 协议', 'root.PCProtocol = api'],
+    ['配置校验 PCConfig', 'window.PCConfig = (function'],
+    ['加密 PCCrypto', 'window.PCCrypto = (function'],
+    ['成员表 PCMembers', 'window.PCMembers = (function'],
+    ['网络 PCNet', 'window.PCNet = function'],
+    ['导出 PCExport', 'window.PCExport = (function'],
+    ['媒体 PCMedia', 'window.PCMedia = function'],
+    ['启动入口 boot()', 'boot();']
+  ];
+  required.forEach(function (pair) {
+    check('单文件客户端已内联 ' + pair[0], built.indexOf(pair[1]) !== -1);
+  });
+
   console.log('\n=== 结果: ' + passed + ' 通过 / ' + failed + ' 失败 ===');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

@@ -30,6 +30,7 @@ const parts = {
   '__PROTOCOL__': safeJs(canonical),
   '__FORGE__': safeJs(read('vendor/forge.min.js')),
   '__CRYPTO__': safeJs(read('client/src/crypto.js')),
+  '__CONFIG__': safeJs(read('client/src/config.js')),
   '__MEMBERS__': safeJs(read('client/src/members.js')),
   '__NET__': safeJs(read('client/src/net.js')),
   '__EXPORT__': safeJs(read('client/src/export.js')),
@@ -44,11 +45,29 @@ for (const key of Object.keys(parts)) {
   html = html.replace(token, () => parts[key]);
 }
 
+/* Every inlined module must contribute its global. This catches the class of
+ * bug where a source file is added but forgotten in the parts/template map. */
+const moduleMarkers = [
+  ['PC 协议', 'root.PCProtocol = api'],
+  ['配置校验', 'window.PCConfig = (function'],
+  ['加密模块', 'window.PCCrypto = (function'],
+  ['成员表', 'window.PCMembers = (function'],
+  ['网络层', 'window.PCNet = function'],
+  ['导出模块', 'window.PCExport = (function'],
+  ['媒体模块', 'window.PCMedia = function'],
+  ['启动脚本', 'boot();']
+];
+for (const [label, marker] of moduleMarkers) {
+  if (html.indexOf(marker) === -1) throw new Error('内联模块缺失: ' + label + ' (' + marker + ')');
+}
+
 /* __PC_CONFIG__ must survive — it is the runtime injection point. */
 if (html.indexOf('__PC_CONFIG__') === -1) throw new Error('运行期占位符 __PC_CONFIG__ 丢失');
-/* No other uppercase placeholders should remain. */
+/* No other build placeholders should remain. __PC_CONFIG_SIG__ is a runtime
+ * global read by config.js, not a build-time placeholder. */
+const RUNTIME_GLOBALS = ['__PC_CONFIG__', '__PC_CONFIG_SIG__'];
 const leftover = html.match(/__[A-Z0-9_]+__/g) || [];
-const unexpected = leftover.filter(x => x !== '__PC_CONFIG__');
+const unexpected = leftover.filter(x => RUNTIME_GLOBALS.indexOf(x) === -1);
 if (unexpected.length) throw new Error('仍有未替换占位符: ' + unexpected.join(', '));
 /* No external resources. */
 if (/<script[^>]+src=/i.test(html) || /<link[^>]+href=/i.test(html)) {
@@ -63,5 +82,5 @@ if (bytes > 500 * 1024) throw new Error('模板体积超过 500 KB: ' + bytes);
 
 write('client/dist/private-chat.template.html', html);
 console.log(`构建完成: client/dist/private-chat.template.html (${(bytes / 1024).toFixed(1)} KB)`);
-console.log('内联: CSS / PC 协议 / forge / crypto / members / net / export / media / app');
+console.log('内联: CSS / PC 协议 / forge / crypto / config / members / net / export / media / app');
 console.log('保留运行期占位符 __PC_CONFIG__，静态校验通过');
