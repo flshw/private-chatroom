@@ -250,6 +250,19 @@ const canonical = P.canonicalJSON;
     deluxe.indexOf('.pcard{width:44px') !== -1 &&
     deluxe.indexOf('.card{width:44px') === -1 &&
     deluxe.indexOf("d.className = 'pcard'") !== -1);
+  check('3D 画布使用高优先级 fixed 定位（不遮挡聊天/游戏）',
+    deluxe.indexOf('#chat>#scene3d{position:fixed') !== -1);
+  check('F5 刷新自动恢复豪华版会话',
+    deluxe.indexOf('var nick = savedNickname();') !== -1 &&
+    deluxe.indexOf('if (isDeluxe() && cached && nick)') !== -1);
+  check('游戏按钮按 4 人门槛启用', deluxe.indexOf('membersList.length >= 4') !== -1);
+  check('开局必须选择另外 3 名玩家',
+    deluxe.indexOf('game.requestStart([mySid].concat(picked));') !== -1 &&
+    deluxe.indexOf("picked.length !== 3") !== -1);
+  check('记牌器按已出牌实时扣减',
+    deluxe.indexOf('id="card-counter"') !== -1 &&
+    deluxe.indexOf('state.played.push(') !== -1 &&
+    deluxe.indexOf('renderCounter(st)') !== -1);
   /* Guandan engine behaviour is covered by tools/test-guandan.js. */
 
   console.log('\n=== 结果: ' + passed + ' 通过 / ' + failed + ' 失败 ===');

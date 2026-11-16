@@ -11,6 +11,13 @@
     seq: 0, serverTs: 0, joined: false, messages: [], expired: false
   };
   var net = null, media = null, countdown = null, game = null;
+  var entering = false;
+
+  /* Deluxe keeps the session across F5: UK lives in IndexedDB, nickname here. */
+  function nickKey() { return 'pc_nick_' + state.config.roomId; }
+  function savedNickname() { try { return localStorage.getItem(nickKey()) || ''; } catch (e) { return ''; } }
+  function saveNickname(n) { try { localStorage.setItem(nickKey(), n); } catch (e) {} }
+  function clearNickname() { try { localStorage.removeItem(nickKey()); } catch (e) {} }
 
   function show(id) {
     ['boot', 'gate', 'chat'].forEach(function (x) { $(x).classList.toggle('hidden', x !== id); });
@@ -98,6 +105,15 @@
     // Preload a persisted UK for this room (refresh reuse).
     var cached = await loadUK(state.config.roomId);
     if (cached) state.uk = cached;
+    // Deluxe: F5 re-enters with the same local key + nickname, no gate click.
+    var nick = savedNickname();
+    if (isDeluxe() && cached && nick) {
+      $('nickname').value = nick;
+      status('gate-status', '正在恢复房间会话…');
+      enter();
+      return;
+    }
+    $('nickname').focus();
   }
 
   function updateGateMeta() {
@@ -108,8 +124,10 @@
 
   /* --- enter: generate (or reuse) UK, self-sign, JOIN --- */
   async function enter() {
+    if (entering) return;
     var nickname = $('nickname').value.trim();
-    if (!nickname) { status('gate-status', '请输入昵称', 'err'); return; }
+    if (!nickname) { status('gate-status', '请输入昵称', 'err'); $('nickname').focus(); return; }
+    entering = true;
     status('gate-status', '正在准备本机密钥…');
     try {
       if (!state.uk) {
@@ -138,12 +156,14 @@
       });
       net.start(frame);
     } catch (e) {
+      entering = false;
       status('gate-status', '进入失败：' + e.message, 'err');
     }
   }
 
   async function onFrame(f) {
     if (f.type === PCProtocol.MSG.JOINED) {
+      entering = false;
       var ok = await PCMembers.apply(f.memberList, f.memberListSig, state.config.roomPubKey);
       if (!ok) { status('gate-status', '成员身份校验失败，已拒绝进入', 'err'); net.close(); return; }
       state.mySid = f.sessionId;
@@ -151,6 +171,7 @@
       state.offsetMs = f.serverTime - Date.now();
       state.joined = true;
       state.seq = 0;
+      saveNickname($('nickname').value.trim());
       enterChat();
       if (game && f.spectate) game.onMessage({ kind: 'spectate_state', spectate: f.spectate });
       // Render history (ciphertext) that this member can decrypt.
@@ -188,7 +209,7 @@
     map[codes.WRAP_INCOMPLETE] = '成员密钥表不同步，请稍候';
     map[codes.KEY_INVALID] = '密钥校验失败';
     var msg = map[f.code] || ('服务器错误：' + f.code);
-    if (!state.joined) status('gate-status', msg, 'err');
+    if (!state.joined) { entering = false; status('gate-status', msg, 'err'); }
     else toast(msg);
     if (f.code === codes.ROOM_INVALID) handleExpiry();
   }
@@ -268,6 +289,9 @@
       list.appendChild(row);
     });
     try { $('safety-code').textContent = '安全码 ' + PCMembers.safetyCode(); } catch (e) {}
+    if (window.PCDeluxe && window.PCDeluxe.onMembers) {
+      window.PCDeluxe.onMembers(PCMembers.all(), state.mySid);
+    }
   }
 
   async function sendText() {
@@ -338,6 +362,7 @@
     if (media && media.inCall()) media.hangup();
     $('input').disabled = true;
     $('btn-send').disabled = true;
+    clearNickname();
     clearUK(state.config.roomId).then(function () { /* local plaintext cleared */ });
   }
 

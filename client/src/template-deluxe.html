@@ -32,7 +32,7 @@
   <header class="topbar">
     <div class="room-name"><span class="dot"></span><span id="room-name">私密聊天</span><span class="deluxe-badge">豪华版</span></div>
     <div class="top-meta"><span id="remain">—</span> · <span id="member-count">—</span></div>
-    <button class="tool-btn" id="btn-game">🃏 掼蛋</button>
+    <button class="tool-btn" id="btn-game" disabled>🃏 掼蛋</button>
     <button class="tool-btn" id="btn-voice-live">🎧 全双工语音</button>
     <button class="icon" id="btn-members" title="成员列表">成员</button>
   </header>
@@ -54,11 +54,16 @@
   <input type="file" id="file-input" class="hidden" />
 
   <div id="game-panel" class="hidden">
+    <div id="card-counter"><span class="cc-title">记牌器 · 剩余</span></div>
+    <div id="game-setup" class="hidden">
+      <div class="setup-title">选择另外 3 名玩家后开局（选定后按房间内固定座次发牌）</div>
+      <div id="player-picks"></div>
+    </div>
     <div class="game-top">
       <span class="title">🃏 掼蛋</span>
       <span class="level" id="game-level">打 2</span>
       <span class="spacer"></span>
-      <button class="tool-btn" id="btn-game-start">开局</button>
+      <button class="tool-btn" id="btn-game-start">开局（0/3）</button>
       <button class="tool-btn" id="btn-game-pass">过牌</button>
       <button class="tool-btn" id="btn-game-play">出牌</button>
     </div>

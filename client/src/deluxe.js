@@ -7,15 +7,72 @@
  */
 window.PCDeluxe = (function () {
   var game = null, ctx = null, voiceOn = false, selected = {};
+  var membersList = [], mySid = null, picked = [];
   var $ = function (id) { return document.getElementById(id); };
 
   function bind(o) {
     game = o.game; ctx = o.app;
+    mySid = (ctx && ctx.state && ctx.state.mySid) || null;
     if (window.PC3D) {
       if (!window.PC3D.available()) window.PC3D.init();
       if (window.PC3D.available()) window.PC3D.start();
     }
     syncSeats();
+  }
+
+  /* Game button stays locked until the room has at least four people. */
+  function onMembers(list, sid) {
+    membersList = list || [];
+    if (sid) mySid = sid;
+    picked = picked.filter(function (s) {
+      return membersList.some(function (m) { return m.sid === s; });
+    });
+    var btn = $('btn-game');
+    if (btn) {
+      var enough = membersList.length >= 4;
+      btn.disabled = !enough;
+      btn.title = enough ? '选择另外 3 名玩家后开局' :
+        ('房间内至少 4 人才能开局（当前 ' + membersList.length + ' 人）');
+    }
+    var panel = $('game-panel');
+    if (panel && !panel.classList.contains('hidden')) renderSetup();
+  }
+
+  function watcherMap() {
+    var out = {};
+    ((game && game.state.spectate) || []).forEach(function (r) {
+      if (r.status === 'approved') out[r.spectatorSid] = true;
+    });
+    return out;
+  }
+
+  /* Exactly one other seat per click, up to three. */
+  function togglePick(sid) {
+    var i = picked.indexOf(sid);
+    if (i >= 0) picked.splice(i, 1);
+    else {
+      if (picked.length >= 3) { if (ctx) ctx.toast('只能选择另外 3 名玩家'); return; }
+      picked.push(sid);
+    }
+    renderSetup();
+  }
+
+  function renderSetup() {
+    var box = $('player-picks');
+    if (!box) return;
+    box.innerHTML = '';
+    var watching = watcherMap();
+    membersList.forEach(function (m) {
+      if (m.sid === mySid || watching[m.sid]) return;
+      var on = picked.indexOf(m.sid) >= 0;
+      var b = document.createElement('button');
+      b.className = 'player-chip' + (on ? ' on' : '');
+      b.textContent = (on ? '✓ ' : '') + m.nickname;
+      b.onclick = function () { togglePick(m.sid); };
+      box.appendChild(b);
+    });
+    var btn = $('btn-game-start');
+    if (btn) btn.textContent = '开局（' + picked.length + '/3）';
   }
 
   function syncSeats() {
@@ -36,10 +93,40 @@ window.PCDeluxe = (function () {
     return d;
   }
 
+  /* Two decks: each ordinary rank appears eight times, each joker twice.
+   * The counter subtracts played cards plus the cards this client can see. */
+  function renderCounter(st) {
+    var box = $('card-counter');
+    if (!box || !window.PCGame) return;
+    var counts = {}, order = [];
+    window.PCGame.makeDeck().forEach(function (c) {
+      if (counts[c.r] === undefined) { counts[c.r] = 0; order.push(c.r); }
+      counts[c.r]++;
+    });
+    var known = (st.played || []).concat(st.spectator ? (st.targetHand || []) : (st.hand || []));
+    known.forEach(function (c) { if (counts[c.r] !== undefined) counts[c.r]--; });
+    box.innerHTML = '';
+    var title = document.createElement('span');
+    title.className = 'cc-title'; title.textContent = '记牌器 · 剩余';
+    box.appendChild(title);
+    order.sort(function (a, b) { return a - b; }).forEach(function (r) {
+      var el = document.createElement('span');
+      el.className = 'cc-rank' + (counts[r] <= 0 ? ' zero' : '');
+      var label = ({ 15: '2', 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 16: '小王', 17: '大王' })[r] || String(r);
+      el.textContent = label + ' ';
+      var b = document.createElement('b'); b.textContent = Math.max(0, counts[r]);
+      el.appendChild(b);
+      box.appendChild(el);
+    });
+  }
+
   function renderGame(st) {
     var seats = $('game-seats'), table = $('game-table'), hand = $('my-hand'), log = $('game-log');
     if (!seats || !table || !hand) return;
     if (!$('game-panel') || $('game-panel').classList.contains('hidden')) return;
+    var setup = $('game-setup');
+    if (setup) setup.classList.toggle('hidden', st.phase === 'playing' || st.phase === 'dealing' || !!st.spectator);
+    renderCounter(st);
     // Seats
     seats.innerHTML = '';
     for (var i = 0; i < 4; i++) {
@@ -100,9 +187,26 @@ window.PCDeluxe = (function () {
   }
 
   function toggleGame() {
-    var p = $('game-panel');
+    var p = $('game-panel'); if (!p) return;
+    var btn = $('btn-game');
+    if (btn && btn.disabled) {
+      if (ctx) ctx.toast('房间内至少 4 人才能开启掼蛋');
+      return;
+    }
+    var opening = p.classList.contains('hidden');
     p.classList.toggle('hidden');
-    if (!p.classList.contains('hidden')) syncSeats();
+    if (opening) {
+      if (!picked.length && game && game.state.players &&
+          (game.state.phase === 'idle' || game.state.phase === 'finished')) {
+        var watching = watcherMap();
+        picked = game.state.players.filter(function (s) {
+          return s !== mySid && !watching[s] && membersList.some(function (m) { return m.sid === s; });
+        }).slice(0, 3);
+      }
+      renderSetup();
+      syncSeats();
+      if (game) renderGame(game.state);
+    }
   }
 
   function onPlayClick() {
@@ -114,8 +218,15 @@ window.PCDeluxe = (function () {
   function onPassClick() { game.pass(); }
 
   function onStartClick() {
-    // Host authority: everyone sends a 'start', host alone actually deals.
-    game.requestStart();
+    if (!game) return;
+    if (picked.length !== 3) { if (ctx) ctx.toast('请先选择另外 3 名玩家'); return; }
+    var watching = watcherMap();
+    var ok = picked.every(function (s) {
+      return s !== mySid && !watching[s] && membersList.some(function (m) { return m.sid === s; });
+    });
+    if (!ok) { if (ctx) ctx.toast('所选玩家已离线或正在旁观，请重新选择'); renderSetup(); return; }
+    // Everyone applies the same seat list; only the selected host deals.
+    game.requestStart([mySid].concat(picked));
   }
 
   /* Choose exactly ONE player to watch. Once locked by the server it cannot
@@ -242,7 +353,7 @@ window.PCDeluxe = (function () {
   else wire();
 
   return {
-    bind: bind, onGameState: onGameState, onSpectateState: onSpectateState, renderGame: renderGame,
+    bind: bind, onMembers: onMembers, onGameState: onGameState, onSpectateState: onSpectateState, renderGame: renderGame,
     pipAddVideo: pipAddVideo, pipClear: pipClear,
     selectCard: function (id) { selected[id] = !selected[id]; },
     _selected: function () { return selected; }

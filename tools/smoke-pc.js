@@ -22,6 +22,9 @@ const WebSocket = require('../server/node_modules/ws');
 const P = require('../shared/protocol.js');
 
 const ROOT = path.resolve(__dirname, '..');
+/* Production runs with PC_DATA_DIR=/var/lib/private-chatroom; the test must
+ * inspect the same database file instead of assuming the dev default. */
+const DATA_DIR = process.env.PC_DATA_DIR || path.join(ROOT, 'server', 'data');
 const BASE = process.env.CHATROOM_PC_BASE || 'http://127.0.0.1:8443';
 const WS_URL = BASE.replace(/^http/, 'ws') + P.DEFAULTS.wsPath;
 
@@ -233,7 +236,7 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
   } catch (e) { decErr = e.message; }
   check('成员 B 解封装 + 解密 + 验签得到原文', decrypted === plaintext, decErr);
   check('服务端库中没有明文（仅密文字段）', (function () {
-    const dbFile = path.join(ROOT, 'server', 'data', 'private-chat.db');
+    const dbFile = path.join(DATA_DIR, 'private-chat.db');
     if (!fs.existsSync(dbFile)) return false;
     const buf = fs.readFileSync(dbFile);
     return buf.indexOf(Buffer.from(plaintext)) === -1;

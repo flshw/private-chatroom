@@ -96,6 +96,13 @@ const deluxeParts = Object.assign({
   '__DELUXE__': safeJs(read('client/src/deluxe.js'))
 }, baseParts);
 const deluxeMarkers = baseMarkers.concat([
+  ['3D 画布层级', '#chat>#scene3d{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}'],
+  ['刷新自动续进', 'var nick = savedNickname();'],
+  ['四人开局门槛', 'membersList.length >= 4'],
+  ['三人选座开局', 'game.requestStart([mySid].concat(picked));'],
+  ['记牌器面板', 'id="card-counter"'],
+  ['选座面板', 'id="game-setup"'],
+  ['出牌统计', 'state.played.push('],
   ['掼蛋引擎', 'root.PCGame = api'],
   ['游戏客户端', 'window.PCGameClient = (function'],
   ['3D 引擎', 'window.PC3D = (function'],

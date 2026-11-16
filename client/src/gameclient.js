@@ -28,6 +28,8 @@ window.PCGameClient = (function () {
       level: 15,                      // start at 2
       phase: 'idle',                  // idle|dealing|playing|finished
       seats: [],                      // [{sid,nickname,isMe}]
+      players: null,                  // the four chosen sids (sorted) once a match is set
+      played: [],                     // every played card, for the card counter
       mySeat: -1,
       hostSid: null,
       hand: [],                       // my cards
@@ -59,15 +61,33 @@ window.PCGameClient = (function () {
      * An approved observer does not take a seat; being watched does not. */
     function syncSeats() {
       var all = members.all().slice().sort(function (a, b) { return a.sid.localeCompare(b.sid); });
-      var players = state.spectator
-        ? all.filter(function (m) { return m.sid !== mySid; })
-        : all;
-      state.seats = players.slice(0, 4).map(function (m) {
+      var pool = all;
+      if (state.players && state.players.length === 4) {
+        pool = state.players.map(function (sid) { return members.get(sid); }).filter(Boolean);
+      }
+      if (state.spectator) pool = pool.filter(function (m) { return m.sid !== mySid; });
+      state.seats = pool.slice(0, 4).map(function (m) {
         return { sid: m.sid, nickname: m.nickname, isMe: m.sid === mySid };
       });
       state.mySeat = seatOfSid(mySid);
       state.hostSid = state.seats.length ? state.seats[0].sid : null;
       return state.seats.length;
+    }
+
+    /* The starter picks the other three players. Everyone applies the same
+     * ordered seat list from the E2EE 'start' frame, so deals cannot diverge. */
+    function setPlayers(ids) {
+      if (!ids || ids.length !== 4) return false;
+      var seen = {}, list = [];
+      ids.forEach(function (sid) {
+        if (!sid || seen[sid] || !members.get(sid)) return;
+        seen[sid] = true; list.push(sid);
+      });
+      if (list.length !== 4) return false;
+      list.sort(function (a, b) { return a.localeCompare(b); });
+      state.players = list;
+      syncSeats(); onUpdate(state);
+      return true;
     }
 
     /* --- E2EE deal: build per-player encrypted hand, wrapped to each ukPub --- */
@@ -128,6 +148,8 @@ window.PCGameClient = (function () {
       state.hostSid = msg.host;
       state.phase = 'playing';
       state.table = null; state.passes = 0; state.finishOrder = []; state.log = [];
+      state.played = [];
+      if (msg.order && msg.order.length === 4) state.players = msg.order.slice();
       syncSeats();
       if (state.spectator) {
         // Decrypt only the ONE hand I was approved to watch.
@@ -212,6 +234,11 @@ window.PCGameClient = (function () {
       state.table = { cards: msg.cards, type: pattern && pattern.type, bySid: msg.by };
       state.tablePattern = pattern;
       state.passes = 0;
+      (msg.cards || []).forEach(function (c) {
+        if (!state.played.some(function (p) { return p.id === c.id; })) {
+          state.played.push({ s: c.s, r: c.r, id: c.id });
+        }
+      });
       var seat = seatOfSid(msg.by);
       if (msg.by !== mySid) {
         state.hand = state.hand.filter(function (c) {
@@ -288,7 +315,10 @@ window.PCGameClient = (function () {
         case 'play': onPlay(msg); break;
         case 'pass': onPass(msg); break;
         case 'finished': onFinished(msg); break;
-        case 'start': if (isHost()) startMatch(); break;
+        case 'start':
+          if (msg.players && !setPlayers(msg.players)) { toast('所选玩家已离线，请重新选择'); break; }
+          if (isHost()) startMatch();
+          break;
         case 'spectate_state': applySpectateState(msg); break;
         default: break;
       }
@@ -347,12 +377,13 @@ window.PCGameClient = (function () {
       note('房主已洗牌发牌');
     }
 
-    function requestStart() { sendGame({ kind: 'start' }); }
+    function requestStart(players) { sendGame({ kind: 'start', players: players || null }); }
     function requestDeal() { sendGame({ kind: 'deal_request', requestBy: mySid }); }
 
     self.state = state;
     self.onMessage = onMessage;
     self.syncSeats = syncSeats;
+    self.setPlayers = setPlayers;
     self.startMatch = startMatch;
     self.requestStart = requestStart;
     self.requestDeal = requestDeal;
