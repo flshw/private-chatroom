@@ -1,0 +1,171 @@
+/*
+ * Copyright (c) 2026 CJS flshw@126.com
+ * Private Chatroom · room-scoped end-to-end encrypted chat. All rights reserved.
+ * Licensed for use with this Private Chatroom distribution only.
+ */
+'use strict';
+/*
+ * Room control plane: apply (auto-approve), issue via the issuer, reissue,
+ * revoke, dissolve, and the TTL-driven destruction cascade. A room's life is
+ * a first-class citizen: every data row carries expires_at and there is a
+ * single idempotent destruction path.
+ */
+const nodeCrypto = require('crypto');
+const P = require('./protocol');
+const { config } = require('./paths');
+
+const SENSITIVE_WORDS = ['admin', 'root', '系统', '官方', '客服', '管理员'];
+
+class Rooms {
+  constructor(db, keyStore, issuer, accounts, hub, logger) {
+    this.db = db;
+    this.keys = keyStore;
+    this.issuer = issuer;
+    this.accounts = accounts;
+    this.hub = hub;
+    this.logger = logger || (() => {});
+    this.serverSecret = this.keys.serverSecret();
+  }
+
+  validateApply(body) {
+    const name = String(body.name || '').trim();
+    if (!name || name.length > P.LIMITS.MAX_ROOM_NAME_CHARS) {
+      throw Object.assign(new Error('房间名须为 1–40 字符'), { status: 400 });
+    }
+    if (/[<>\r\n"']/.test(name)) throw Object.assign(new Error('房间名含非法字符'), { status: 400 });
+    const lower = name.toLowerCase();
+    if (SENSITIVE_WORDS.some(w => lower.indexOf(w) !== -1)) {
+      throw Object.assign(new Error('房间名含保留词'), { status: 400 });
+    }
+    const rawTtl = body.ttlSeconds;
+    const ttl = rawTtl === undefined || rawTtl === null || rawTtl === ''
+      ? P.LIMITS.DEFAULT_TTL_SECONDS : Number(rawTtl);
+    if (!Number.isInteger(ttl) || ttl < P.LIMITS.MIN_TTL_SECONDS || ttl > P.LIMITS.MAX_TTL_SECONDS) {
+      throw Object.assign(new Error('生命期须在 60–259200 秒之间'), { status: 400 });
+    }
+    const maxMembers = body.maxMembers === undefined ? P.LIMITS.DEFAULT_MAX_MEMBERS : Number(body.maxMembers);
+    if (!Number.isInteger(maxMembers) || maxMembers < 2 || maxMembers > config.hardMaxMembers) {
+      throw Object.assign(new Error('人数上限须在 2–' + config.hardMaxMembers + ' 之间'), { status: 400 });
+    }
+    return { name, ttlSeconds: ttl, maxMembers };
+  }
+
+  /* Apply → auto-approve → issue, in one logical operation. */
+  apply(user, body) {
+    const v = this.validateApply(body);
+    const active = this.accounts.activeRoomCount(user.id);
+    if (active >= (user.quota_rooms || config.maxRoomsPerUser)) {
+      throw Object.assign(new Error('活跃房间已达配额上限'), { status: 403 });
+    }
+    const roomId = 'r_' + nodeCrypto.randomBytes(P.LIMITS.ROOM_ID_BYTES).toString('hex');
+    const now = Date.now();
+    const meta = {
+      roomId, name: v.name, ttlSeconds: v.ttlSeconds, maxMembers: v.maxMembers,
+      issuedAt: now, expiresAt: now + v.ttlSeconds * 1000
+    };
+    const built = this.issuer.build(meta, this.serverSecret);
+    this.db.createRoom({
+      id: roomId, ownerId: user.id, name: v.name, status: 'issued',
+      ttlSeconds: v.ttlSeconds, maxMembers: v.maxMembers,
+      createdAt: now, issuedAt: now, expiresAt: meta.expiresAt,
+      joinTokenHash: built.joinTokenHash, configDigest: built.configDigest,
+      roomPubKey: built.roomPubKey, roomPrivRef: built.roomPrivRef, sigCount: 1
+    });
+    this.db.audit('room_issued', roomId, now);
+    this.logger('房间已签发: ' + roomId + ' (' + v.name + ')');
+    return { roomId, expiresAt: meta.expiresAt, filename: built.filename, html: built.html };
+  }
+
+  listByOwner(userId) {
+    const now = Date.now();
+    return this.db.roomsByOwner(userId).map(r => ({
+      roomId: r.id, name: r.name, status: r.status,
+      createdAt: r.created_at, issuedAt: r.issued_at, expiresAt: r.expires_at,
+      remainSeconds: Math.max(0, Math.floor((r.expires_at - now) / 1000)),
+      maxMembers: r.max_members, sigCount: r.sig_count,
+      clientUrl: config.apiPrefix + '/rooms/' + r.id + '/client'
+    }));
+  }
+
+  /* Download (re)issued client. Reissue rotates joinToken AND RK pair. */
+  issueClient(user, roomId) {
+    const room = this.db.room(roomId);
+    if (!room || room.owner_id !== user.id) throw Object.assign(new Error('房间不存在'), { status: 404 });
+    if (room.status === 'destroyed' || room.status === 'destroying') {
+      throw Object.assign(new Error('房间已销毁'), { status: 410 });
+    }
+    const now = Date.now();
+    if (room.expires_at <= now) {
+      this.destroy(roomId, 'expired');
+      throw Object.assign(new Error('房间已到期'), { status: 410 });
+    }
+    const meta = {
+      roomId, name: room.name, maxMembers: room.max_members,
+      issuedAt: now, expiresAt: room.expires_at
+    };
+    const built = this.issuer.build(meta, this.serverSecret);
+    // Old RK private key and token are invalidated immediately.
+    this.keys.deleteRoomKey(roomId, room.room_priv_ref);
+    this.db.reissueRoom(roomId, {
+      joinTokenHash: built.joinTokenHash, configDigest: built.configDigest,
+      roomPubKey: built.roomPubKey, roomPrivRef: built.roomPrivRef,
+      issuedAt: now, expiresAt: meta.expiresAt
+    });
+    if (this.hub) this.hub.kickAll(roomId, 'reissued');
+    this.db.audit('room_reissued', roomId, now);
+    this.logger('房间重新签发: ' + roomId);
+    return { filename: built.filename, html: built.html };
+  }
+
+  revoke(user, roomId) {
+    const room = this.db.room(roomId);
+    if (!room || room.owner_id !== user.id) throw Object.assign(new Error('房间不存在'), { status: 404 });
+    this.db.revokeRoom(roomId, Date.now());
+    this.keys.deleteRoomKey(roomId, room.room_priv_ref);
+    if (this.hub) this.hub.kickAll(roomId, 'revoked');
+    this.db.audit('room_revoked', roomId, Date.now());
+    return { ok: true };
+  }
+
+  dissolve(user, roomId) {
+    const room = this.db.room(roomId);
+    if (!room || room.owner_id !== user.id) throw Object.assign(new Error('房间不存在'), { status: 404 });
+    return this.destroy(roomId, 'dissolved');
+  }
+
+  /* Single idempotent destruction path. */
+  destroy(roomId, reason) {
+    const room = this.db.room(roomId);
+    if (!room) return { ok: true, reason };
+    if (this.hub) this.hub.broadcastExpired(roomId, reason || 'expired');
+    this.db.setRoomStatus(roomId, 'destroying');
+    this.db.destroyRoom(roomId);
+    this.keys.deleteRoomKey(roomId, room.room_priv_ref);
+    if (this.hub) this.hub.clearRoom(roomId);
+    this.db.audit('room_destroyed', roomId, Date.now());
+    this.logger('房间已销毁: ' + roomId + ' (' + reason + ')');
+    return { ok: true, reason };
+  }
+
+  sweepExpired() {
+    const now = Date.now();
+    const due = this.db.roomsNeedingCleanup(now);
+    for (const r of due) this.destroy(r.id, 'expired');
+    return due.length;
+  }
+
+  /* Non-sensitive status for client self-check. No session required. */
+  status(roomId) {
+    const room = this.db.room(roomId);
+    const now = Date.now();
+    if (!room || room.status === 'destroyed' || room.revoke_at) {
+      return { ok: false, status: 'invalid', serverTime: now };
+    }
+    return {
+      ok: true, status: room.status, serverTime: now,
+      expiresAt: room.expires_at, remainSeconds: Math.max(0, Math.floor((room.expires_at - now) / 1000))
+    };
+  }
+}
+
+module.exports = { Rooms };

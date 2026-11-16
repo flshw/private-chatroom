@@ -1,0 +1,15 @@
+# Dependencies
+server/node_modules/
+
+# Runtime state: contains signing keys, session data and ciphertext. Never commit.
+server/data/
+server/dist/
+
+# Local logs and OS metadata
+*.log
+.DS_Store
+Thumbs.db
+
+# Editor backups
+*.swp
+*.tmp
