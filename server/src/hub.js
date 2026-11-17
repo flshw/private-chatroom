@@ -25,6 +25,7 @@ class Hub {
     this.rooms = options.rooms;   // Rooms instance (for status / destroy)
     this.canonical = options.canonicalJSON;
     this.logger = options.logger || (() => {});
+    this.connLog = options.connLog || (() => {});
     this.serverSecret = options.serverSecret || this.keys.serverSecret();
     this.sessions = new Set();
     this.byRoom = new Map();      // roomId -> Map<sid, session>
@@ -39,15 +40,28 @@ class Hub {
      * lifetime — the observer cannot switch or add another target. The server
      * only arbitrates identity/consent; it never sees any cards. */
     this.spectators = new Map();  // roomId -> Map<spectatorUkPub, relation>
+    /* Track the most recent sid per (room, ukPub) across disconnects so the
+     * connection trace can label a JOIN as FRESH vs RECONNECT. Diagnostic only. */
+    this.recentUkSid = new Map(); // "roomId\u0001ukPub" -> sid
   }
+
+  ukKey(roomId, ukPub) { return roomId + '\u0001' + ukPub; }
+  ukToSid(roomId, ukPub) { return this.recentUkSid.get(this.ukKey(roomId, ukPub)) || null; }
 
   attach(session) {
     this.sessions.add(session);
     session.isAlive = true;
+    session.connId = nodeCrypto.randomBytes(3).toString('hex'); // short, for log correlation
+    session.connectedAt = Date.now();
+    this.connLog('CONN-OPEN id=' + session.connId + ' total=' + this.sessions.size);
     return session;
   }
 
   detach(session) {
+    const heldMs = session.connectedAt ? (Date.now() - session.connectedAt) : -1;
+    this.connLog('CONN-CLOSE id=' + (session.connId || '?') + ' sid=' + (session.sid || '-') +
+      ' room=' + (session.roomId || '-') + ' joined=' + !!session.joined + ' heldMs=' + heldMs +
+      ' total=' + this.sessions.size);
     this.sessions.delete(session);
     if (session.roomId && session.sid) {
       const room = this.byRoom.get(session.roomId);
@@ -55,7 +69,7 @@ class Hub {
         room.delete(session.sid);
         this.seqBySid.delete(session.sid);
         if (room.size === 0) this.byRoom.delete(session.roomId);
-        else this.broadcastMemberKeys(session.roomId);
+        else { this.connLog('MEMBER-KEYS room=' + session.roomId + ' reason=member-left sid=' + session.sid); this.broadcastMemberKeys(session.roomId); }
       }
     }
   }
@@ -88,6 +102,8 @@ class Hub {
   }
 
   error(session, code, note) {
+    this.connLog('ERROR id=' + (session.connId || '?') + ' sid=' + (session.sid || '-') +
+      ' room=' + (session.roomId || '-') + ' code=' + code + (note ? ' note=' + note : ''));
     session.send({ type: P.MSG.ERROR, code, note: note || undefined });
   }
 
@@ -170,9 +186,14 @@ class Hub {
     if (map.size >= room.max_members) return this.error(session, P.ERR.ROOM_FULL);
 
     // Accept. Assign a random sid that is not a member of this room yet.
+    const hadSid = this.ukToSid(roomId, ukPub);
     let sid;
     do { sid = 's_' + nodeCrypto.randomBytes(P.LIMITS.SID_BYTES).toString('hex'); }
     while (map.has(sid));
+
+    this.connLog('JOIN id=' + (session.connId || '?') + ' room=' + roomId + ' newSid=' + sid +
+      ' priorSid=' + (hadSid || '-') + (hadSid ? ' RECONNECT' : ' FRESH') +
+      ' members=' + (map.size + 1) + '/' + room.max_members);
 
     session.joined = true;
     session.roomId = roomId;
@@ -182,6 +203,7 @@ class Hub {
     session.selfSig = selfSig;
     session.clientTime = f.clientTime;
     map.set(sid, session);
+    this.recentUkSid.set(this.ukKey(roomId, ukPub), sid);
     this.seqBySid.set(sid, 0);
     this.db.setRoomStatus(roomId, 'active');
     this.db.audit('member_joined', roomId, now);
@@ -270,6 +292,8 @@ class Hub {
     if (!m.iv || !m.ct || !m.tag) return this.error(session, P.ERR.BAD_ENVELOPE);
     this.db.addMessage(m);
     this.seqBySid.set(session.sid, e.seq);
+    this.connLog('MSG-OK id=' + (session.connId || '?') + ' sid=' + session.sid + ' room=' + roomId +
+      ' seq=' + e.seq + ' kind=' + m.kind + ' wraps=' + Object.keys(wraps).length);
     const broadcast = Object.assign({}, e, { fromSession: session.sid });
     delete broadcast.sig;
     delete broadcast.senderPub;

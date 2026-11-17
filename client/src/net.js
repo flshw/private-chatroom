@@ -27,6 +27,13 @@ window.PCNet = function (handlers) {
     return base + (config.wsUrl || '/pc/ws');
   }
 
+  function diag(tag, detail) {
+    // Connection-layer trace. Routed into the same bot diagnosis panel so the
+    // client timeline can be correlated with the server's conn-*.log.
+    if (handlers.onDiag) handlers.onDiag(tag, detail);
+    else if (console.info) console.info('[PCDIAG] NET ' + tag, detail || '');
+  }
+
   function send(obj) {
     if (ws && ws.readyState === 1) { ws.send(JSON.stringify(obj)); return true; }
     return false;
@@ -37,6 +44,7 @@ window.PCNet = function (handlers) {
     if (closedByUser || reconnectTimer) return;
     retries++;
     var delay = Math.min(8000, 500 * Math.pow(2, Math.min(retries, 6))) + Math.random() * 400;
+    diag('NET-RECONNECT-SCHED', 'retry=' + retries + ' delay=' + Math.round(delay) + 'ms');
     reconnectTimer = setTimeout(function () { reconnectTimer = null; connect(joinFrame); }, delay);
   }
 
@@ -47,8 +55,10 @@ window.PCNet = function (handlers) {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     pongMiss = 0;
     var u = url();
+    diag('NET-CONNECT', 'readyState=' + (ws ? ws.readyState : 'new') + ' retry=' + retries);
     try { ws = new WebSocket(u); }
     catch (e) {
+      diag('NET-CONNECT-ERR', e && e.message ? e.message : String(e));
       if (handlers.onError) handlers.onError('连接地址无效');
       scheduleReconnect();
       return;
@@ -60,6 +70,7 @@ window.PCNet = function (handlers) {
     connectTimer = setTimeout(function () {
       connectTimer = null;
       if (ws && ws.readyState !== 1) {
+        diag('CONNECT-TIMEOUT', 'state=' + ws.readyState + ' -> force close');
         if (console.warn) console.warn('[PCDIAG] CONNECT-TIMEOUT state=' + ws.readyState + ' -> force reconnect');
         try { ws.close(); } catch (e) {}
         setTimeout(function () {
@@ -71,6 +82,7 @@ window.PCNet = function (handlers) {
     ws.onopen = function () {
       if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
       retries = 0; pongMiss = 0;
+      diag('NET-OPEN', 'readyState=1 -> JOIN sent=' + !!joinFrame);
       if (joinFrame) send(joinFrame);
       if (handlers.onOpen) handlers.onOpen();
     };
@@ -81,25 +93,29 @@ window.PCNet = function (handlers) {
       if (f.type === PCProtocol.MSG.PONG) return;
       if (handlers.onFrame) handlers.onFrame(f);
     };
-    ws.onclose = function () {
+    ws.onclose = function (ev) {
       if (connectTimer) { clearTimeout(connectTimer); connectTimer = null; }
       if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+      diag('NET-CLOSE', 'code=' + (ev && ev.code) + ' reason=' + ((ev && ev.reason) || '').slice(0, 40) +
+        ' closedByUser=' + closedByUser + ' readyState=' + (ev && ev.target ? ev.target.readyState : '?'));
       if (closedByUser) return;
       if (handlers.onClose) handlers.onClose();
       scheduleReconnect();
     };
-    ws.onerror = function () { /* close / connect watchdog drive reconnect */ };
+    ws.onerror = function () { diag('NET-ERROR', 'readyState=' + (ws ? ws.readyState : '?')); };
 
     if (!heartbeat) {
       heartbeat = setInterval(function () {
         if (!ws || ws.readyState !== 1) return; // connect watchdog handles non-OPEN
         if (pongMiss >= 2) {
           /* Half-open: TCP says OPEN but no frames arrive. Force a fresh socket. */
+          diag('HEARTBEAT-DEAD', 'pongMiss=' + pongMiss + ' -> force close');
           if (console.warn) console.warn('[PCDIAG] HEARTBEAT-DEAD -> force reconnect');
           try { ws.close(); } catch (e) {}
           return;
         }
         pongMiss++;
+        diag('NET-PING', 'pongMiss=' + pongMiss);
         send({ type: PCProtocol.MSG.PING, ts: Date.now() });
       }, HEARTBEAT_MS);
     }

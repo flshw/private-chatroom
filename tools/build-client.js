@@ -175,6 +175,17 @@ const deluxeMarkers = baseMarkers.concat([
   ['断线不消耗seq', 'seq rolled back from'],
   ['REPLAY错误可见', '消息时序错乱(REPLAY)'],
   ['外部错误接入诊断', 'self.noteDiag = function'],
+  /* v19: reconnect resilience — sid migration preserves the match, connection
+   * layer events enter the diagnosis panel, history game frames are skipped. */
+  ['重连sid迁移接口', 'self.updateMySid = function (newSid)'],
+  ['重连sid迁移日志', 'SID-MIGRATE'],
+  ['重连恢复牌局日志', 'RECONNECT-RESUME'],
+  ['enterChat幂等', 'if (chatReady && game) {'],
+  ['历史game帧跳过', 'if (skipGameHistory) return;'],
+  ['连接层诊断接入', 'onDiag: function (tag, detail)'],
+  ['建连诊断', "diag('NET-CONNECT'"],
+  ['断连诊断', "diag('NET-CLOSE'"],
+  ['重连调度诊断', "diag('NET-RECONNECT-SCHED'"],
   ['诊断面板UI', 'id="diag-panel"'],
   ['诊断复制按钮', 'id="btn-diag-copy"'],
   ['诊断下载按钮', 'id="btn-diag-download"'],

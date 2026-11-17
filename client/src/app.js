@@ -12,6 +12,7 @@
   };
   var net = null, media = null, countdown = null, game = null;
   var entering = false;
+  var chatReady = false;   // true once game/media/UI are initialised (survives WSS reconnect)
 
   /* Deluxe keeps the session across F5: UK lives in IndexedDB, nickname here. */
   function nickKey() { return 'pc_nick_' + state.config.roomId; }
@@ -134,6 +135,13 @@
         onOpen: function () { status('gate-status', '已连接，正在校验成员身份…', 'ok'); },
         onClose: function () { if (!state.expired) toast('连接中断，正在重连…'); },
         onError: function (m) { status('gate-status', m, 'err'); },
+        onDiag: function (tag, detail) {
+          // Feed connection-layer events into the same diagnosis timeline so
+          // "重连后卡死" can be correlated with the server's conn-*.log.
+          if (game && typeof game.noteDiag === 'function') {
+            game.noteDiag(tag + (detail ? ' | ' + detail : ''));
+          }
+        },
         onFrame: onFrame
       });
       net.start(frame);
@@ -148,16 +156,21 @@
       entering = false;
       var ok = await PCMembers.apply(f.memberList, f.memberListSig, state.config.roomPubKey);
       if (!ok) { status('gate-status', '成员身份校验失败，已拒绝进入', 'err'); net.close(); return; }
+      var prevSid = state.mySid;                 // may be old sid on a reconnect
+      var resumedMatch = chatReady && game && game.state && game.state.phase === 'playing';
       state.mySid = f.sessionId;
       state.serverTs = f.serverTime;
       state.offsetMs = f.serverTime - Date.now();
       state.joined = true;
       state.seq = 0;
       saveNickname($('nickname').value.trim());
-      enterChat();
+      enterChat(prevSid);
       if (game && f.spectate) game.onMessage({ kind: 'spectate_state', spectate: f.spectate });
-      // Render history (ciphertext) that this member can decrypt.
-      (f.history || []).forEach(renderEnvelope);
+      // Render history (ciphertext) that this member can decrypt. On a WSS
+      // reconnect we keep the live in-memory match (sid already migrated), so
+      // replaying historical game frames would rewind phase/turn and re-inject
+      // OLD sids — skip them. A fresh F5 (no local match) still replays them.
+      (f.history || []).forEach(function (env) { renderEnvelope(env, null, null, resumedMatch); });
       updateMembersUI();
       startCountdown(f.expiresAt);
     } else if (f.type === PCProtocol.MSG.MEMBER_KEYS) {
@@ -207,7 +220,7 @@
     if (f.code === codes.ROOM_INVALID) handleExpiry();
   }
 
-  async function renderEnvelope(env, frameSig, frameSenderPub) {
+  async function renderEnvelope(env, frameSig, frameSenderPub, skipGameHistory) {
     // Live broadcasts put sig/senderPub on the frame; stored history keeps
     // them inside the envelope. Accept both shapes.
     var envSig = frameSig || env.sig;
@@ -226,6 +239,10 @@
     // Game payloads ride the same E2EE channel but are routed to the game
     // engine instead of the chat transcript (deluxe edition only).
     if (env.kind === 'game') {
+      // On a WSS reconnect the live match is preserved in memory. Historical
+      // game frames carry the PRE-reconnect sids and would rewind the state
+      // machine (re-deal / reset turn / stale host), so ignore them here.
+      if (skipGameHistory) return;
       // Never silently swallow a game frame again: a malformed/undecryptable
       // echo used to vanish here, so the sender's turn never advanced. Log it.
       try {
@@ -346,9 +363,29 @@
     if (console.info && kind === 'game') console.info('[PCDIAG] SENT game seq=' + usedSeq);
   }
 
-  function enterChat() {
+  function enterChat(prevSid) {
     show('chat');
     $('room-name').textContent = state.config.name || '私密聊天';
+
+    /* Reconnect: the engine/UI already exist. Do NOT rebuild them — that used
+     * to reset phase to idle and throw away hands, turn and botHands, so a
+     * match could never be resumed after a reconnect. Instead translate the
+     * old sid to the freshly assigned one and repaint. */
+    if (chatReady && game) {
+      if (prevSid && prevSid !== state.mySid && typeof game.updateMySid === 'function') {
+        game.updateMySid(state.mySid);
+      }
+      if (window.PCDeluxe && window.PCDeluxe.onMembers) {
+        window.PCDeluxe.onMembers(game.roster ? game.roster() : PCMembers.all(), state.mySid);
+      }
+      if (window.PCDeluxe && window.PCDeluxe.renderGame) window.PCDeluxe.renderGame(game.state, game);
+      if (game && typeof game.noteDiag === 'function') {
+        game.noteDiag('RECONNECT-RESUME prevSid=' + (prevSid || '-') + ' newSid=' + state.mySid +
+          ' phase=' + game.state.phase + ' turn=' + game.state.turn);
+      }
+      return;
+    }
+
     media = new window.PCMedia({
       config: state.config, net: net,
       mySid: state.mySid, uk: state.uk,
@@ -381,6 +418,7 @@
       window.PCDeluxe.bind({ game: game, app: { net: net, media: media, state: state,
         sendKind: sendKind, toast: toast } });
     }
+    chatReady = true;
   }
 
   function startCountdown(expiresAt) {
@@ -418,6 +456,7 @@
     if (window.PCDeluxe && window.PCDeluxe.pipClear) window.PCDeluxe.pipClear();
     if (net) { net.close(); net = null; }
     game = null;
+    chatReady = false;
     state.joined = false; state.mySid = null; state.seq = 0; state.uk = null;
     state.messages = []; entering = false;
     $('messages').innerHTML = '';

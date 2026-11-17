@@ -829,6 +829,29 @@ window.PCGameClient = (function () {
     self.cardsLabel = cardsLabel;
     self.diagText = diagText;         // export bot behaviour trace for the UI
     self.noteDiag = function (text) { dlog('EXTERNAL', text); }; // app-layer errors (e.g. E_REPLAY) feed the trace
+    /* A WSS reconnect assigns a fresh sid. Keep the match alive by translating
+     * every stored reference to my OLD sid into the new one, instead of tearing
+     * down and rebuilding the engine (which used to reset phase to idle and
+     * lose hands/turn/botHands -> "重连后无法继续牌局"). Called from app.js on
+     * JOINED, before any game frames are replayed. */
+    self.updateMySid = function (newSid) {
+      if (!newSid || newSid === mySid) return false;
+      var old = mySid;
+      function repl(v) { return v === old ? newSid : v; }
+      mySid = newSid;
+      state.hostSid = repl(state.hostSid);
+      if (state.players) state.players = state.players.map(repl);
+      if (state.seats) state.seats.forEach(function (s) { if (s.sid === old) { s.sid = newSid; s.isMe = true; } else s.isMe = false; });
+      state.turn = repl(state.turn);
+      state.lastWinner = repl(state.lastWinner);
+      if (state.finishOrder) state.finishOrder = state.finishOrder.map(repl);
+      if (state._passEchoSig) state._passEchoSig = state._passEchoSig.replace(old, newSid);
+      state.mySeat = seatOfSid(newSid);
+      dlog('SID-MIGRATE', old + ' -> ' + newSid + ' host=' + state.hostSid + ' turn=' + state.turn + ' phase=' + state.phase);
+      onUpdate(state);
+      return true;
+    };
+    self.mySid = function () { return mySid; };
     self.botsEnabled = botsEnabled;
     self.isBotSid = isBotSid;
     self.botNick = botNick;

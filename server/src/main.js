@@ -29,6 +29,18 @@ function logger(msg) {
   else console.log(line);
 }
 
+/* Dedicated connection/message trace. Kept SEPARATE from the boot log so a
+ * reconnect storm can be handed off in one small file. Carries no plaintext —
+ * only structural facts: sid, room, seq, accept/reject reason, WS state. */
+function connLog(msg) {
+  const line = '[' + new Date().toISOString() + '] ' + msg;
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    fs.appendFileSync(path.join(LOG_DIR, 'conn-' + new Date().toISOString().slice(0, 10) + '.log'), line + '\n');
+  } catch (e) { /* noop */ }
+  if (verbose) console.log('CONN ' + msg);
+}
+
 let httpServer, wss, heartbeat, sweepTimer, db;
 
 async function boot() {
@@ -38,12 +50,12 @@ async function boot() {
   const keys = new KeyStore(logger).init();
   const accounts = new Accounts(db, logger);
   const issuer = new Issuer(db, keys, P.canonicalJSON, logger);
-  const hub = new Hub({ db, keys, canonicalJSON: P.canonicalJSON, logger, serverSecret: keys.serverSecret() });
+  const hub = new Hub({ db, keys, canonicalJSON: P.canonicalJSON, logger, connLog, serverSecret: keys.serverSecret() });
   const shares = new Shares(db, logger);
   const rooms = new Rooms(db, keys, issuer, accounts, hub, logger);
   rooms.shares = shares;
   hub.rooms = rooms;
-  const srv = createHttpServer({ accounts, rooms, hub, db, keyStore: keys, logger, shares });
+  const srv = createHttpServer({ accounts, rooms, hub, db, keyStore: keys, logger, connLog, shares });
   httpServer = srv.server;
   wss = srv.wss;
   heartbeat = srv.heartbeat;

@@ -89,7 +89,8 @@ function makeServer(handler) {
 }
 
 function createHttpServer(options) {
-  const { accounts, rooms, hub, db, keyStore, logger, shares } = options;
+  const { accounts, rooms, hub, db, keyStore, logger, connLog, shares } = options;
+  const trace = connLog || (() => {});
   const API = config.apiPrefix;
   const PUB = config.publicPrefix;
   const server = makeServer(async (req, res) => {
@@ -318,18 +319,31 @@ function createHttpServer(options) {
       error(code, note) { this.send({ type: P.MSG.ERROR, code, note }); }
     };
     hub.attach(session);
+    ws._session = session;
     ws.on('pong', () => session.touch());
     ws.on('message', raw => {
       try { hub.handle(session, JSON.parse(raw.toString())); }
-      catch (e) { session.error(P.ERR.BAD_ENVELOPE, 'JSON 解析失败'); }
+      catch (e) { trace('BAD-JSON id=' + (session.connId || '?') + ' err=' + e.message); session.error(P.ERR.BAD_ENVELOPE, 'JSON 解析失败'); }
     });
-    ws.on('close', () => hub.detach(session));
-    ws.on('error', () => { /* handled by close */ });
+    ws.on('close', (code, reason) => {
+      trace('WS-CLOSE id=' + (session.connId || '?') +
+        ' code=' + code + ' reason=' + String(reason || '').slice(0, 40) + ' sid=' + (session.sid || '-'));
+      hub.detach(session);
+    });
+    ws.on('error', e => trace('WS-ERROR id=' + (session.connId || '?') + ' err=' + (e && e.message ? e.message : '?')));
   });
   const heartbeat = setInterval(() => {
     for (const ws of wss.clients) {
-      if (ws.isAlive === false) { try { ws.terminate(); } catch (e) { /* noop */ } continue; }
-      ws.isAlive = false;
+      /* Read/write the SAME object that the pong handler touches (session),
+       * NOT ws. Previously this used ws.isAlive while pong set session.isAlive,
+       * so no pong ever cleared the flag and every socket was terminated on the
+       * 2nd tick (~50s) regardless of liveness — a forced reconnect loop. */
+      const session = ws._session;
+      if (session && session.isAlive === false) {
+        trace('HEARTBEAT-KILL id=' + (session.connId || '?') + ' (no pong for ' + P.LIMITS.HEARTBEAT_MS + 'ms)');
+        try { ws.terminate(); } catch (e) { /* noop */ } continue;
+      }
+      if (session) session.isAlive = false;
       try { ws.ping(); } catch (e) { /* noop */ }
     }
     db.purgeSessions(Date.now());
