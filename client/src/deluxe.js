@@ -510,6 +510,57 @@ window.PCDeluxe = (function () {
     if ($('pip-video')) $('pip-video').classList.add('hidden');
   }
 
+  /* ---- Bot diagnostics panel: refresh / copy / download the trace ---- */
+  function openDiag() {
+    var p = $('diag-panel');
+    if (!p) return;
+    p.classList.remove('hidden');
+    refreshDiag();
+  }
+  function closeDiag() {
+    var p = $('diag-panel');
+    if (p) p.classList.add('hidden');
+  }
+  function diagTextSafe() {
+    if (!game || typeof game.diagText !== 'function') return '（诊断功能不可用：游戏引擎未初始化）';
+    try { return game.diagText(); } catch (e) { return '（读取诊断日志失败：' + (e && e.message ? e.message : e) + '）'; }
+  }
+  function refreshDiag() {
+    var body = $('diag-body');
+    if (body) body.textContent = diagTextSafe();
+  }
+  function copyDiag() {
+    var text = diagTextSafe();
+    var done = function (ok) { ctx && ctx.toast(ok ? '诊断日志已复制到剪贴板' : '复制失败，请长按日志手动全选'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { fallbackCopy(text, done); });
+    } else fallbackCopy(text, done);
+  }
+  function fallbackCopy(text, done) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      done(!!ok);
+    } catch (e) { done(false); }
+  }
+  function downloadDiag() {
+    var text = diagTextSafe();
+    try {
+      var blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = '掼蛋机器人诊断日志-' + Date.now() + '.txt';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      ctx && ctx.toast('诊断日志已下载');
+    } catch (e) { ctx && ctx.toast('下载失败，请使用复制功能'); }
+  }
+
   function wire() {
     $('btn-game') && $('btn-game').addEventListener('click', toggleGame);
     $('btn-game-start') && $('btn-game-start').addEventListener('click', onStartClick);
@@ -517,6 +568,11 @@ window.PCDeluxe = (function () {
     $('btn-game-pass') && $('btn-game-pass').addEventListener('click', onPassClick);
     $('btn-game-arrange') && $('btn-game-arrange').addEventListener('click', onArrangeClick);
     $('btn-game-spread') && $('btn-game-spread').addEventListener('click', onSpreadClick);
+    $('btn-game-diag') && $('btn-game-diag').addEventListener('click', openDiag);
+    $('btn-diag-close') && $('btn-diag-close').addEventListener('click', closeDiag);
+    $('btn-diag-refresh') && $('btn-diag-refresh').addEventListener('click', refreshDiag);
+    $('btn-diag-copy') && $('btn-diag-copy').addEventListener('click', copyDiag);
+    $('btn-diag-download') && $('btn-diag-download').addEventListener('click', downloadDiag);
     $('btn-spectate') && $('btn-spectate').addEventListener('click', requestSpectate);
     $('btn-setup-close') && $('btn-setup-close').addEventListener('click', function () { showSetup(false); });
     $('game-setup-mask') && $('game-setup-mask').addEventListener('click', function () { showSetup(false); });

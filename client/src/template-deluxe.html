@@ -68,6 +68,7 @@
     <div class="game-actions">
       <button class="tool-btn" id="btn-game-arrange" title="按掼蛋理牌习惯重新归类手牌">🀄 自动理牌</button>
       <button class="tool-btn" id="btn-game-spread" title="切换堆叠/平铺显示">↔ 平铺</button>
+      <button class="tool-btn" id="btn-game-diag" title="查看机器人完整行为日志（排查不出牌）">🐞 诊断</button>
       <span style="font-size:11px;color:var(--muted)">同类牌纵向叠放·点单张牌选中·点下方「出牌」 · 牌局全程端到端加密</span>
     </div>
     <div class="game-log" id="game-log"></div>
@@ -75,6 +76,17 @@
       <button class="tool-btn" id="btn-game-pass">过牌</button>
       <button class="tool-btn" id="btn-game-play">出牌</button>
     </div>
+  </div>
+  <div id="diag-panel" class="hidden">
+    <div class="diag-head">
+      <span>🐞 机器人行为诊断日志</span>
+      <button class="tool-btn" id="btn-diag-refresh" title="刷新日志">🔄 刷新</button>
+      <button class="tool-btn" id="btn-diag-copy" title="复制全部日志">📋 复制</button>
+      <button class="tool-btn" id="btn-diag-download" title="下载日志文本">💾 下载</button>
+      <button class="tool-btn" id="btn-diag-close" title="关闭">✕ 关闭</button>
+    </div>
+    <div class="diag-hint" id="diag-hint">若机器人不出牌，请 reproduce 后点「复制」或「下载」把日志发给开发者。</div>
+    <pre class="diag-body" id="diag-body"></pre>
   </div>
   <div id="game-setup-mask" class="hidden"></div>
   <div id="game-setup" class="hidden">

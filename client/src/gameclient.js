@@ -49,6 +49,41 @@ window.PCGameClient = (function () {
     var botWatchdog = null;              // safety net: re-drive a bot if its move never advances the turn
     var BOT_WATCHDOG_MS = 5000;          // > botThinkMs + one E2EE round trip; only fires on a stuck turn
 
+    /* --- Bot behaviour diagnostics ---------------------------------------
+     * A separate, timestamped trace of the whole bot driver: scheduling,
+     * decisions, E2EE sends (incl. async buildMessage rejections, which a plain
+     * try/catch CANNOT see because sendGame returns a Promise), broadcast echoes
+     * and turn advancement. Kept out of state.log so it never floods the chat,
+     * and exportable via diagText() for the user to paste back to us. */
+    var DIAG_MAX = 400;
+    var diagLog = [];
+    function dlog(tag, detail) {
+      var now = new Date();
+      var ts = now.toTimeString().slice(0, 8) + '.' + ('00' + now.getMilliseconds()).slice(-3);
+      diagLog.push('[' + ts + '] ' + tag + (detail === undefined || detail === null ? '' : ' | ' + detail));
+      if (diagLog.length > DIAG_MAX) diagLog.shift();
+      if (typeof console !== 'undefined' && console.info) console.info('[PCDIAG] ' + tag, detail === undefined ? '' : detail);
+    }
+    function botHandSizes() {
+      var out = {};
+      Object.keys(state.botHands || {}).forEach(function (k) { out[k] = (state.botHands[k] || []).length; });
+      return JSON.stringify(out);
+    }
+    function diagText() {
+      var head = [
+        '=== 掼蛋机器人诊断日志 ===',
+        '时间 ' + new Date().toLocaleString(),
+        '我=' + mySid + ' 房主=' + state.hostSid + ' 我是否房主=' + isHost(),
+        '阶段=' + state.phase + ' 局=' + state.roundNo + ' 级=' + rankName(state.level),
+        '座位=' + JSON.stringify(state.seats.map(function (s) { return (s.sid || '') + (s.isBot ? '(bot)' : ''); })),
+        '当前回合=' + state.turn + ' 机器人手牌=' + botHandSizes(),
+        '完成次序=' + JSON.stringify(state.finishOrder) + ' 桌面牌=' + (state.tablePattern ? (state.tablePattern.name || state.tablePattern.type) : '无'),
+        '机器人开关=' + botsEnabled + ' 旁观=' + state.spectator,
+        '------------------------------'
+      ];
+      return head.concat(diagLog).join('\n');
+    }
+
     function isBotSid(sid) { return BOT_SIDS.indexOf(sid) !== -1; }
     function botNick(sid) { var i = BOT_SIDS.indexOf(sid); return i < 0 ? '机器人' : BOT_NICKS[i]; }
     function clearBotTimer() {
@@ -237,6 +272,8 @@ window.PCGameClient = (function () {
     }
 
     async function onDeal(msg) {
+      dlog('DEAL', 'round=' + msg.round + ' host=' + msg.host + ' order=' + JSON.stringify(msg.order) +
+        ' myHand=' + (mySid && msg.hands && msg.hands[mySid] ? 'wrapped' : 'none'));
       state.roundNo = msg.round;
       state.level = msg.level;
       state.hostSid = msg.host;
@@ -357,6 +394,7 @@ window.PCGameClient = (function () {
      * and by onPass() for other players' broadcasts. */
     function applyPass(by) {
       state.passes++;
+      dlog('APPLY-PASS', 'by=' + by + ' passes=' + state.passes + '/' + (state.seats.length - 1 - state.finishOrder.length));
       var seat = seatOfSid(by);
       try { note((by === mySid ? '你' : (state.seats[seat] ? state.seats[seat].nickname : '玩家')) + ' 过牌'); } catch (e) {}
       if (state.passes >= state.seats.length - 1 - state.finishOrder.length) {
@@ -377,7 +415,8 @@ window.PCGameClient = (function () {
             (isBotSid(leadSid) && !(state.botHands[leadSid] || []).length)) {
           leadSid = nextActiveSid(leadSid) || leadSid;
         }
-        try { note('新一轮，由 ' + ((state.seats[seatOfSid(leadSid)] || {}).nickname || '玩家') + ' 领出'); } catch (e) {}
+        try {         note('新一轮，由 ' + ((state.seats[seatOfSid(leadSid)] || {}).nickname || '玩家') + ' 领出'); } catch (e) {}
+        dlog('NEW-TRICK', 'lead=' + leadSid + ' (lastWinner=' + state.lastWinner + ')');
         state.turn = leadSid;
       } else {
         advanceTurn(by);
@@ -387,6 +426,8 @@ window.PCGameClient = (function () {
     }
 
     async function onPlay(msg) {
+      dlog('ECHO-PLAY', 'by=' + msg.by + ' bot=' + (!!msg.bot) + ' cards=' +
+        ((msg.cards || []).length) + ' round=' + msg.round + ' | turn before=' + state.turn);
       // Apply the authoritative state defensively, then ALWAYS advance the
       // turn. The old code could throw before advanceTurn (classify on an
       // unexpected card, a logging/render fault), leaving the turn stuck on a
@@ -425,6 +466,7 @@ window.PCGameClient = (function () {
     }
 
     function onPass(msg) {
+      dlog('ECHO-PASS', 'by=' + msg.by + ' round=' + msg.round + ' | turn before=' + state.turn);
       // Our own optimistic pass already applied this broadcast's effect.
       var sig = state.roundNo + '|' + msg.by;
       if (msg.by === mySid && state._passEchoSig === sig) {
@@ -435,11 +477,14 @@ window.PCGameClient = (function () {
     }
 
     function advanceTurn(fromSid) {
+      var prevTurn = state.turn;
       var i = seatOfSid(fromSid);
       for (var n = 1; n <= state.seats.length; n++) {
         var cand = state.seats[(i + n) % state.seats.length];
         if (state.finishOrder.indexOf(cand.sid) === -1) { state.turn = cand.sid; break; }
       }
+      dlog('ADVANCE', 'from=' + fromSid + ' turn ' + prevTurn + ' -> ' + state.turn +
+        ' | finish=' + JSON.stringify(state.finishOrder));
       // lastWinner is NOT touched here. It is updated ONLY when someone plays
       // cards (see onPlay / optimistic play). Updating it on a pass made the
       // next trick get led by the last PASSER instead of the last player —
@@ -455,22 +500,34 @@ window.PCGameClient = (function () {
      * onPass, so seats, table and card counter stay in sync everywhere. */
     function scheduleBot() {
       clearBotTimer();
-      if (!botsEnabled || !isHost() || state.phase !== 'playing' || state.spectator) return;
       var sid = state.turn;
-      if (!sid || !isBotSid(sid)) return;
+      dlog('SCHEDULE', 'turn=' + sid + ' enabled=' + botsEnabled + ' isHost=' + isHost() +
+        ' phase=' + state.phase + ' spectator=' + state.spectator + ' hands=' + botHandSizes());
+      if (!botsEnabled || !isHost() || state.phase !== 'playing' || state.spectator) {
+        dlog('SCHEDULE-SKIP', 'guard: enabled=' + botsEnabled + ' isHost=' + isHost() +
+          ' phase=' + state.phase + ' spectator=' + state.spectator);
+        return;
+      }
+      if (!sid || !isBotSid(sid)) {
+        dlog('SCHEDULE-SKIP', 'turn is not a bot (human seat or empty)');
+        return;
+      }
       if (!state.botHands || !state.botHands[sid] || !state.botHands[sid].length) {
         // Turn landed on a cardless bot (its 'finished' echo was lost). Treat
         // it as finished locally and hand the lead to the next active seat,
         // otherwise nobody drives this turn and the table freezes.
+        dlog('BOT-CARDLESS', sid + ' | finishOrder=' + JSON.stringify(state.finishOrder));
         if (state.finishOrder.indexOf(sid) === -1) {
           state.finishOrder.push(sid);
           try { sendGame({ kind: 'finished', round: state.roundNo, by: sid,
             order: state.finishOrder.slice() }); } catch (e) {}
         }
         var next = nextActiveSid(sid);
+        dlog('BOT-CARDLESS-NEXT', sid + ' -> ' + next);
         if (next && next !== sid) { state.turn = next; onUpdate(state); scheduleBot(); }
         return;
       }
+      dlog('BOT-TIMER-SET', sid + ' in ' + botThinkMs + 'ms | hand=' + state.botHands[sid].length);
       botTimer = setTimeout(function () { botTimer = null; botStep(sid); }, botThinkMs);
     }
 
@@ -485,50 +542,116 @@ window.PCGameClient = (function () {
       if (!botsEnabled || !isHost() || state.phase !== 'playing') return;
       botWatchdog = setTimeout(function () {
         botWatchdog = null;
+        dlog('WD-FIRE', sid + ' | turn=' + state.turn + ' phase=' + state.phase +
+          ' hand=' + ((state.botHands[sid] || []).length));
         // Still this bot's turn and still its move pending? Then the echo that
         // should have advanced the turn never arrived — drive it again.
         if (isHost() && state.phase === 'playing' && !state.spectator &&
             state.turn === sid && state.botHands[sid] && state.botHands[sid].length) {
+          dlog('WD-REDRIVE', sid);
           botStep(sid);
+        } else {
+          dlog('WD-NOOP', 'turn moved on or bot out of cards');
         }
       }, BOT_WATCHDOG_MS);
+      dlog('WD-ARM', sid + ' in ' + BOT_WATCHDOG_MS + 'ms');
+    }
+
+    /* sendGame returns a Promise (app.js sendKind is async: buildMessage awaits
+     * the RSA wrap + signature). A rejection used to be invisible — a bare
+     * try/catch cannot catch an async rejection, so a failed bot PLAY silently
+     * vanished and the watchdog was the only hint. Track it explicitly. */
+    function sendDiag(payload, label, onFail) {
+      var out;
+      try { out = sendGame(payload); }
+      catch (e) {
+        dlog('SEND-SYNC-ERR', label + ' | ' + (e && e.message ? e.message : e));
+        if (onFail) onFail(e);
+        return false;
+      }
+      var failed = function (e) {
+        dlog('SEND-REJECT', label + ' | ' + (e && e.message ? e.message : e));
+        // Roll back any optimistic hand mutation this action already made,
+        // otherwise every watchdog re-drive silently burns another card
+        // (a dropped connection ate 6 cards in one game: 26->20).
+        if (onFail) onFail(e);
+        // A rejected SEND means no echo will ever advance the turn for this
+        // action — re-drive via watchdog so the game cannot stall. Only arm
+        // when the pending action belongs to a bot seat.
+        var pending = state.turn;
+        if (isHost() && state.phase === 'playing' && !state.spectator && isBotSid(pending)) {
+          armBotWatchdog(pending);
+        }
+      };
+      if (out && typeof out.then === 'function') {
+        out.then(function () { dlog('SEND-OK', label); }).catch(failed);
+      } else {
+        dlog('SEND-OK', label + ' (sync)');
+      }
+      return true;
     }
 
     function botStep(sid) {
+      dlog('BOT-STEP', sid + ' | turn=' + state.turn + ' hand=' + ((state.botHands[sid] || []).length) +
+        ' table=' + (state.tablePattern ? (state.tablePattern.name || state.tablePattern.type) : 'lead'));
       // Re-validate after the think delay: state may have moved on.
-      if (!isHost() || state.phase !== 'playing' || state.spectator || state.turn !== sid) return;
+      if (!isHost() || state.phase !== 'playing' || state.spectator || state.turn !== sid) {
+        dlog('BOT-STEP-ABORT', 'guard | isHost=' + isHost() + ' phase=' + state.phase +
+          ' spectator=' + state.spectator + ' turn=' + state.turn);
+        return;
+      }
       var hand = state.botHands[sid];
-      if (!hand || !hand.length) return;
+      if (!hand || !hand.length) { dlog('BOT-STEP-ABORT', 'empty hand'); return; }
       var move = null;
       try {
         move = window.PCBots.chooseMove({
           hand: hand, tablePattern: state.tablePattern || null, level: state.level
         }, window.PCGame);
-      } catch (e) { move = null; }
+      } catch (e) { dlog('DECIDE-ERR', sid + ' | ' + (e && e.message ? e.message : e)); move = null; }
+      dlog('DECIDE', sid + ' -> ' + (move
+        ? ('PLAY ' + (move.pattern && move.pattern.name ? move.pattern.name : move.pattern.type) +
+           ' cards=' + move.cards.map(function (c) { return rankName(c.r) + (c.s || ''); }).join(','))
+        : 'PASS'));
       try {
         if (!move) {
           // Cannot beat the table -> pass (legal whenever there is a table).
-          sendGame({ kind: 'pass', round: state.roundNo, by: sid });
+          sendDiag({ kind: 'pass', round: state.roundNo, by: sid }, 'PASS by ' + sid);
         } else {
           var ids = {};
           move.cards.forEach(function (c) { ids[c.id] = true; });
+          var before = hand.slice();
+          var played = hand.filter(function (c) { return ids[c.id]; });
           state.botHands[sid] = hand.filter(function (c) { return !ids[c.id]; });
-          sendGame({ kind: 'play', round: state.roundNo, by: sid,
-            cards: move.cards.map(function (c) { return { s: c.s, r: c.r, id: c.id }; }),
+          // HANDS-ROLLBACK: if the play is rejected (e.g. socket not OPEN),
+          // put the removed cards BACK. Optimistically dropping them with no
+          // rollback made every watchdog re-drive burn one more card, so the
+          // bot slowly "lost" its hand while never actually playing anything.
+          var rollback = function () {
+            state.botHands[sid] = before;
+            dlog('HANDS-ROLLBACK', sid + ' restored ' + played.length +
+              ' cards | hand ' + state.botHands[sid].length);
+            try { onUpdate(state); } catch (e) {}
+          };
+          sendDiag({ kind: 'play', round: state.roundNo, by: sid,
+            cards: played.map(function (c) { return { s: c.s, r: c.r, id: c.id }; }),
             pattern: { type: move.pattern.type, rank: move.pattern.rank, len: move.pattern.len },
-            bot: true });
+            bot: true }, 'PLAY by ' + sid + ' ' + played.length + ' cards, left=' + state.botHands[sid].length,
+            rollback);
           // Bot finished its cards -> announce so team scoring can resolve.
+          // Guard: on rejection rollback() already restored the hand, so do
+          // NOT announce a finish for a play that never left the device.
           if (!state.botHands[sid].length) {
             var order = state.finishOrder.slice();
             if (order.indexOf(sid) === -1) order.push(sid);
-            sendGame({ kind: 'finished', round: state.roundNo, by: sid, order: order });
+            sendDiag({ kind: 'finished', round: state.roundNo, by: sid, order: order },
+              'FINISHED by ' + sid + ' order=' + JSON.stringify(order));
           }
         }
         // Published. Arm the safety net in case the echo never comes back.
         armBotWatchdog(sid);
       } catch (e) {
-        // sendGame/buildMessage failed (e.g. transient key/wrap error). Do not
-        // leave the turn stuck: retry shortly; watchdog also covers this.
+        // sendDiag already logs sync errors; this catches anything else.
+        dlog('BOT-STEP-ERR', sid + ' | ' + (e && e.message ? e.message : e));
         armBotWatchdog(sid);
       }
     }
@@ -561,8 +684,11 @@ window.PCGameClient = (function () {
     }
 
     function onFinished(msg) {
+      dlog('FINISHED-ECHO', 'by=' + msg.by + ' order=' + JSON.stringify(msg.order) +
+        ' | prev=' + JSON.stringify(state.finishOrder));
       state.finishOrder = msg.order.slice();
       if (state.finishOrder.length >= 2) {
+        dlog('MATCH-OVER', 'order=' + JSON.stringify(state.finishOrder) + ' level ' + rankName(state.level) + ' -> settlement');
         var team = state.seats.map(function (s, idx) { return idx % 2; });
         var order = state.finishOrder.map(function (sid) { return seatOfSid(sid); });
         if (order.length >= 2 && team[order[0]] === team[order[1]]) {
@@ -585,6 +711,8 @@ window.PCGameClient = (function () {
 
     /* Receive a decrypted game payload from the chat E2EE layer. */
     function onMessage(msg) {
+      dlog('RECV', 'kind=' + msg.kind + (msg.by ? ' by=' + msg.by : '') +
+        (msg.round ? ' round=' + msg.round : '') + ' | decode ok');
       switch (msg.kind) {
         case 'deal': onDeal(msg); break;
         case 'deal_request': openDealForLate(msg); break;
@@ -699,6 +827,8 @@ window.PCGameClient = (function () {
     };
     self.rankName = rankName;
     self.cardsLabel = cardsLabel;
+    self.diagText = diagText;         // export bot behaviour trace for the UI
+    self.noteDiag = function (text) { dlog('EXTERNAL', text); }; // app-layer errors (e.g. E_REPLAY) feed the trace
     self.botsEnabled = botsEnabled;
     self.isBotSid = isBotSid;
     self.botNick = botNick;

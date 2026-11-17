@@ -140,5 +140,42 @@ console.log('\n=== 机器人存活/看门狗故障注入测试 ===');
   check('空手牌机器人不会被分配回合', !(st.turn === 'bot_1' && st.botHands.bot_1.length === 0), 'turn=' + st.turn);
 }
 
-console.log('\n=== 结果: ' + pass + ' 通过 / ' + fail + ' 失败 ===');
-process.exit(fail ? 1 : 0);
+// Test 4 (async): rejected PLAY must roll the bot's hand back (no card burning).
+// The rejection is handled in a Promise .catch (microtask), so flush microtasks
+// before asserting. sendGame returns a rejected Promise to mirror sendKind
+// throwing "连接未就绪" while the socket reconnects.
+(async function () {
+  const sb = makeSandbox();
+  const sent = [];
+  let rejectNext = false;
+  const ctx = {
+    config: { roomId: 'r_test' }, mySid: 'me', uk: { publicPem: 'p', privatePem: 'k' },
+    members: { all: () => [], get: () => null },
+    sendGame: msg => {
+      sent.push(msg);
+      if (rejectNext) return Promise.reject(new Error('连接未就绪，消息未发送'));
+      return Promise.resolve();
+    },
+    sendControl: () => {}, toast: () => {}, bots: true, onUpdate: () => {}
+  };
+  const game = sb.window.PCGameClient.create(ctx);
+  const hands = dealHands();
+  const st = seedHand(sb, game, hands);
+  const handBefore = hands[1].length;
+  // 'me' leads its LOWEST single so bot_1 can almost certainly beat it -> PLAY.
+  const lead = st.hand.reduce((a, b) => (a.r <= b.r ? a : b));
+  game.onMessage({ kind: 'play', by: 'me', round: st.roundNo, cards: [lead],
+    pattern: { type: 1, rank: lead.r, len: 1 } });
+  check('前置: 回合到 bot_1', st.turn === 'bot_1', 'turn=' + st.turn);
+  // Socket goes down right before bot_1 acts.
+  rejectNext = true;
+  sb.__advance(2000); // bot_1 thinks -> PLAY -> rejected
+  await new Promise(r => setImmediate(r)); // let Promise .catch (rollback) run
+  const played = sent.filter(m => m.by === 'bot_1' && m.kind === 'play');
+  check('机器人确实尝试出牌(而非过牌)', played.length >= 1, 'plays=' + played.length);
+  const after = st.botHands.bot_1.length;
+  check('发送被拒后机器人手牌回滚(未凭空少牌)', after === handBefore,
+    'before=' + handBefore + ' after=' + after);
+  console.log('\n=== 结果: ' + pass + ' 通过 / ' + fail + ' 失败 ===');
+  process.exitCode = fail ? 1 : 0;
+})();

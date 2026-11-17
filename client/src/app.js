@@ -191,6 +191,17 @@
     map[codes.WRAP_INCOMPLETE] = '成员密钥表不同步，请稍候';
     map[codes.KEY_INVALID] = '密钥校验失败';
     var msg = map[f.code] || ('服务器错误：' + f.code);
+    if (console.warn) console.warn('[PCDIAG] SERVER-ERROR code=' + f.code + ' msg=' + msg + ' localSeq=' + state.seq);
+    // Surface seq desync loudly: the old build only toasted briefly, so a bot
+    // freeze caused by E_REPLAY looked like "机器人不出牌" with no clue.
+    if (f.code === codes.REPLAY && state.joined) {
+      try {
+        if (game && typeof game.noteDiag === 'function') {
+          game.noteDiag('⚠ 消息时序错乱(REPLAY)·请点诊断查看');
+        }
+      } catch (_) {}
+      toast('消息时序错乱，请记录诊断日志后刷新重连');
+    }
     if (!state.joined) { entering = false; status('gate-status', msg, 'err'); }
     else toast(msg);
     if (f.code === codes.ROOM_INVALID) handleExpiry();
@@ -215,7 +226,17 @@
     // Game payloads ride the same E2EE channel but are routed to the game
     // engine instead of the chat transcript (deluxe edition only).
     if (env.kind === 'game') {
-      try { if (game) game.onMessage(JSON.parse(text)); } catch (e) { /* ignore malformed game frame */ }
+      // Never silently swallow a game frame again: a malformed/undecryptable
+      // echo used to vanish here, so the sender's turn never advanced. Log it.
+      try {
+        if (game && typeof game.diagText === 'function' && console.info) {
+          console.info('[PCDIAG] GAME-FRAME-IN sender=' + env.senderSid + ' seq=' + env.seq);
+        }
+        if (game) game.onMessage(JSON.parse(text));
+        else if (console.warn) console.warn('[PCDIAG] GAME-FRAME-DROP: game engine not initialised');
+      } catch (e) {
+        if (console.warn) console.warn('[PCDIAG] GAME-FRAME-MALFORMED: ' + (e && e.message ? e.message : e));
+      }
       return;
     }
     var mine = env.senderSid === state.mySid;
@@ -290,14 +311,39 @@
   }
 
   async function sendKind(plaintext, kind) {
-    state.seq += 1;
+    /* ROOT-CAUSE FIX (bot "not playing" freeze):
+     * seq was incremented optimistically BEFORE send, but net.send() silently
+     * returns false when the WebSocket is not OPEN (reconnecting). One message
+     * lost in that window bumps the local seq while the server never receives
+     * it; from then on EVERY message's seq is off-by-one, the server rejects all
+     * of them with E_REPLAY, and no broadcast echo returns. The bot turn then
+     * sticks forever and the watchdog's re-sends are all rejected too.
+     * Fix: require an OPEN socket first; if build/send fails, ROLL BACK seq so
+     * the next attempt reuses the same seq and stays in lockstep with server. */
+    if (!net || typeof net.connected === 'function' && !net.connected()) {
+      var e0 = new Error('连接未就绪，消息未发送');
+      if (console.warn) console.warn('[PCDIAG] SEND-SKIP websocket not OPEN, seq not consumed');
+      throw e0;
+    }
+    var usedSeq = state.seq + 1;
     state.serverTs = now();
     var members = PCMembers.all().map(function (m) { return { sid: m.sid, ukPub: m.ukPub }; });
-    var frame = await PCCrypto.buildMessage(plaintext, {
-      config: state.config, mySid: state.mySid, seq: state.seq, serverTs: state.serverTs,
-      kind: kind, members: members, uk: state.uk
-    });
-    net.send(frame);
+    var frame;
+    try {
+      frame = await PCCrypto.buildMessage(plaintext, {
+        config: state.config, mySid: state.mySid, seq: usedSeq, serverTs: state.serverTs,
+        kind: kind, members: members, uk: state.uk
+      });
+    } catch (e) {
+      if (console.warn) console.warn('[PCDIAG] SEND-BUILD-ERR seq=' + usedSeq + ' ' + (e && e.message));
+      throw e; // seq NOT consumed
+    }
+    if (!net.send(frame)) {
+      if (console.warn) console.warn('[PCDIAG] SEND-FAIL websocket send returned false, seq rolled back from ' + usedSeq);
+      throw new Error('消息发送失败（连接中断）'); // seq NOT consumed
+    }
+    state.seq = usedSeq; // commit only after a successful hand-off to the socket
+    if (console.info && kind === 'game') console.info('[PCDIAG] SENT game seq=' + usedSeq);
   }
 
   function enterChat() {

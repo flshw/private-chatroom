@@ -313,3 +313,20 @@ BASE_STYLES_PLACEHOLDER
   /* Modals must fit the short height. */
   #game-setup,.spectate-picker{padding:12px;gap:8px;max-height:92vh;overflow:auto}
 }
+
+/* ---- Bot behaviour diagnostics panel ---- */
+#diag-panel{position:fixed;inset:5% 6%;z-index:12000;display:flex;flex-direction:column;
+  background:var(--panel,#12151c);color:var(--text,#e6e8ee);border:1px solid rgba(140,160,200,.35);
+  border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.6);overflow:hidden;font-family:inherit}
+#diag-panel.hidden{display:none}
+#diag-panel .diag-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:10px 14px;border-bottom:1px solid rgba(140,160,200,.22);font-weight:600;font-size:14px}
+#diag-panel .diag-head>span{margin-right:auto}
+#diag-panel .diag-head .tool-btn{font-size:12px;padding:5px 10px;min-height:34px}
+#diag-panel .diag-hint{padding:8px 14px;font-size:11px;line-height:1.5;color:var(--muted,#9aa4b2);
+  border-bottom:1px solid rgba(140,160,200,.15)}
+#diag-panel .diag-body{flex:1;margin:0;padding:12px 14px;overflow:auto;
+  font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;
+  word-break:break-word;-webkit-overflow-scrolling:touch;background:rgba(0,0,0,.18)}
+@media(max-width:720px){#diag-panel{inset:3% 3%}}
+
