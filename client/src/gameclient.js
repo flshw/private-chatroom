@@ -29,14 +29,32 @@ window.PCGameClient = (function () {
     var sendGame = ctx.sendGame;      // (plaintextGameJson) => sendKind(json,'game')
     var sendControl = ctx.sendControl || function () {}; // raw server control frames
     var toast = ctx.toast || function () {};
-    var onUpdate = ctx.onUpdate || function () {};
+    var onUpdateRaw = ctx.onUpdate || function () {};
+    /* UI rendering must never be able to abort game-state progression. onPlay
+     * calls note() (which calls onUpdate -> PCDeluxe.renderGame) BEFORE it
+     * advances the turn; a thrown DOM/render error there used to abort the
+     * function so the turn never advanced and bots froze. Wrap the callback so
+     * a rendering fault is contained while state keeps moving. */
+    var renderWarned = false;
+    var onUpdate = function (st) {
+      try { onUpdateRaw(st); }
+      catch (e) {
+        if (!renderWarned) { renderWarned = true; try { toast('界面刷新异常，牌局继续进行'); } catch (_) {} }
+        if (typeof console !== 'undefined' && console.warn) console.warn('[PCGame] render error contained:', e);
+      }
+    };
     var botsEnabled = !!ctx.bots;        // deluxe only; simple edition has none
     var botTimer = null;                 // scheduler for the local bot's next move
-    var botThinkingMs = 1400;            // slower: give a human a clear window to tap 过牌/出牌 before the bot grabs the turn
+    var botThinkMs = 1400;               // slower: give a human a clear window to tap 过牌/出牌 before the bot grabs the turn
+    var botWatchdog = null;              // safety net: re-drive a bot if its move never advances the turn
+    var BOT_WATCHDOG_MS = 5000;          // > botThinkMs + one E2EE round trip; only fires on a stuck turn
 
     function isBotSid(sid) { return BOT_SIDS.indexOf(sid) !== -1; }
     function botNick(sid) { var i = BOT_SIDS.indexOf(sid); return i < 0 ? '机器人' : BOT_NICKS[i]; }
-    function clearBotTimer() { if (botTimer) { clearTimeout(botTimer); botTimer = null; } }
+    function clearBotTimer() {
+      if (botTimer) { clearTimeout(botTimer); botTimer = null; }
+      if (botWatchdog) { clearTimeout(botWatchdog); botWatchdog = null; }
+    }
 
     var state = {
       level: 15,                      // start at 2
@@ -340,7 +358,7 @@ window.PCGameClient = (function () {
     function applyPass(by) {
       state.passes++;
       var seat = seatOfSid(by);
-      note((by === mySid ? '你' : (state.seats[seat] ? state.seats[seat].nickname : '玩家')) + ' 过牌');
+      try { note((by === mySid ? '你' : (state.seats[seat] ? state.seats[seat].nickname : '玩家')) + ' 过牌'); } catch (e) {}
       if (state.passes >= state.seats.length - 1 - state.finishOrder.length) {
         // New trick led by the player who actually PLAYED last (lastWinner),
         // never by the last passer. lastWinner is updated only on play().
@@ -352,7 +370,14 @@ window.PCGameClient = (function () {
         if (state.finishOrder.indexOf(leadSid) !== -1) {
           leadSid = nextActiveSid(leadSid) || by;
         }
-        note('新一轮，由 ' + ((state.seats[seatOfSid(leadSid)] || {}).nickname || '玩家') + ' 领出');
+        // A finished/cardless leader can still deadlock here (e.g. its finish
+        // echo lost). Fall back to the next active seat so a bot always leads.
+        if (state.finishOrder.indexOf(leadSid) !== -1 ||
+            !state.botHands ||
+            (isBotSid(leadSid) && !(state.botHands[leadSid] || []).length)) {
+          leadSid = nextActiveSid(leadSid) || leadSid;
+        }
+        try { note('新一轮，由 ' + ((state.seats[seatOfSid(leadSid)] || {}).nickname || '玩家') + ' 领出'); } catch (e) {}
         state.turn = leadSid;
       } else {
         advanceTurn(by);
@@ -362,28 +387,39 @@ window.PCGameClient = (function () {
     }
 
     async function onPlay(msg) {
-      var pattern = window.PCGame.classify(msg.cards, state.level) || msg.pattern;
-      state.table = { cards: msg.cards, type: pattern && pattern.type, bySid: msg.by };
-      state.tablePattern = pattern;
-      state.passes = 0;
-      state.lastWinner = msg.by;  // only a PLAY (never a pass) may win the trick
-      (msg.cards || []).forEach(function (c) {
-        if (!state.played.some(function (p) { return p.id === c.id; })) {
-          state.played.push({ s: c.s, r: c.r, id: c.id });
-        }
-      });
-      var seat = seatOfSid(msg.by);
-      if (msg.by !== mySid) {
-        state.hand = state.hand.filter(function (c) {
-          return !(msg.cards || []).some(function (p) { return p.id === c.id; });
+      // Apply the authoritative state defensively, then ALWAYS advance the
+      // turn. The old code could throw before advanceTurn (classify on an
+      // unexpected card, a logging/render fault), leaving the turn stuck on a
+      // bot forever — "机器人卡死不出牌". Wrapping the apply step and moving
+      // turn progression into a finally-style tail guarantees liveness.
+      try {
+        var pattern = null;
+        try { pattern = window.PCGame.classify(msg.cards, state.level); } catch (e) { pattern = null; }
+        pattern = pattern || msg.pattern || null;
+        state.table = { cards: msg.cards, type: pattern && pattern.type, bySid: msg.by };
+        state.tablePattern = pattern;
+        state.passes = 0;
+        state.lastWinner = msg.by;  // only a PLAY (never a pass) may win the trick
+        (msg.cards || []).forEach(function (c) {
+          if (!state.played.some(function (p) { return p.id === c.id; })) {
+            state.played.push({ s: c.s, r: c.r, id: c.id });
+          }
         });
-      }
-      var who = state.seats[seat] ? state.seats[seat].nickname : '玩家';
-      note(who + ' 出 ' + cardsLabel(msg.cards, pattern));
-      if (state.hand.length === 0 && state.finishOrder.indexOf(mySid) === -1) {
-        state.finishOrder.push(mySid);
-        note('你出完了！第 ' + state.finishOrder.length + ' 名');
-        sendGame({ kind: 'finished', round: state.roundNo, by: mySid, order: state.finishOrder.slice() });
+        var seat = seatOfSid(msg.by);
+        if (msg.by !== mySid) {
+          state.hand = state.hand.filter(function (c) {
+            return !(msg.cards || []).some(function (p) { return p.id === c.id; });
+          });
+        }
+        var who = state.seats[seat] ? state.seats[seat].nickname : '玩家';
+        try { note(who + ' 出 ' + cardsLabel(msg.cards, pattern)); } catch (e) {}
+        if (state.hand.length === 0 && state.finishOrder.indexOf(mySid) === -1) {
+          state.finishOrder.push(mySid);
+          try { note('你出完了！第 ' + state.finishOrder.length + ' 名'); } catch (e) {}
+          try { sendGame({ kind: 'finished', round: state.roundNo, by: mySid, order: state.finishOrder.slice() }); } catch (e) {}
+        }
+      } catch (e) {
+        if (typeof console !== 'undefined' && console.warn) console.warn('[PCGame] onPlay apply error:', e);
       }
       advanceTurn(msg.by);
     }
@@ -422,8 +458,40 @@ window.PCGameClient = (function () {
       if (!botsEnabled || !isHost() || state.phase !== 'playing' || state.spectator) return;
       var sid = state.turn;
       if (!sid || !isBotSid(sid)) return;
-      if (!state.botHands || !state.botHands[sid] || !state.botHands[sid].length) return;
-      botTimer = setTimeout(function () { botTimer = null; botStep(sid); }, botThinkingMs);
+      if (!state.botHands || !state.botHands[sid] || !state.botHands[sid].length) {
+        // Turn landed on a cardless bot (its 'finished' echo was lost). Treat
+        // it as finished locally and hand the lead to the next active seat,
+        // otherwise nobody drives this turn and the table freezes.
+        if (state.finishOrder.indexOf(sid) === -1) {
+          state.finishOrder.push(sid);
+          try { sendGame({ kind: 'finished', round: state.roundNo, by: sid,
+            order: state.finishOrder.slice() }); } catch (e) {}
+        }
+        var next = nextActiveSid(sid);
+        if (next && next !== sid) { state.turn = next; onUpdate(state); scheduleBot(); }
+        return;
+      }
+      botTimer = setTimeout(function () { botTimer = null; botStep(sid); }, botThinkMs);
+    }
+
+    /* A bot's move is published over E2EE and its turn advance comes back via
+     * the broadcast echo. If that echo is ever lost (a rejected frame, a thrown
+     * exception in the receive path, a transient wrap/seq hiccup) the turn would
+     * sit on the bot forever — "机器人卡死不出牌". The watchdog re-drives the
+     * same bot after a grace period, but ONLY while the turn is still on that
+     * bot. As soon as any echo advances the turn, clearBotTimer() cancels it. */
+    function armBotWatchdog(sid) {
+      if (botWatchdog) { clearTimeout(botWatchdog); botWatchdog = null; }
+      if (!botsEnabled || !isHost() || state.phase !== 'playing') return;
+      botWatchdog = setTimeout(function () {
+        botWatchdog = null;
+        // Still this bot's turn and still its move pending? Then the echo that
+        // should have advanced the turn never arrived — drive it again.
+        if (isHost() && state.phase === 'playing' && !state.spectator &&
+            state.turn === sid && state.botHands[sid] && state.botHands[sid].length) {
+          botStep(sid);
+        }
+      }, BOT_WATCHDOG_MS);
     }
 
     function botStep(sid) {
@@ -437,23 +505,31 @@ window.PCGameClient = (function () {
           hand: hand, tablePattern: state.tablePattern || null, level: state.level
         }, window.PCGame);
       } catch (e) { move = null; }
-      if (!move) {
-        // Cannot beat the table -> pass (legal whenever there is a table).
-        sendGame({ kind: 'pass', round: state.roundNo, by: sid });
-        return;
-      }
-      var ids = {};
-      move.cards.forEach(function (c) { ids[c.id] = true; });
-      state.botHands[sid] = hand.filter(function (c) { return !ids[c.id]; });
-      sendGame({ kind: 'play', round: state.roundNo, by: sid,
-        cards: move.cards.map(function (c) { return { s: c.s, r: c.r, id: c.id }; }),
-        pattern: { type: move.pattern.type, rank: move.pattern.rank, len: move.pattern.len },
-        bot: true });
-      // Bot finished its cards -> announce so team scoring can resolve.
-      if (!state.botHands[sid].length) {
-        var order = state.finishOrder.slice();
-        if (order.indexOf(sid) === -1) order.push(sid);
-        sendGame({ kind: 'finished', round: state.roundNo, by: sid, order: order });
+      try {
+        if (!move) {
+          // Cannot beat the table -> pass (legal whenever there is a table).
+          sendGame({ kind: 'pass', round: state.roundNo, by: sid });
+        } else {
+          var ids = {};
+          move.cards.forEach(function (c) { ids[c.id] = true; });
+          state.botHands[sid] = hand.filter(function (c) { return !ids[c.id]; });
+          sendGame({ kind: 'play', round: state.roundNo, by: sid,
+            cards: move.cards.map(function (c) { return { s: c.s, r: c.r, id: c.id }; }),
+            pattern: { type: move.pattern.type, rank: move.pattern.rank, len: move.pattern.len },
+            bot: true });
+          // Bot finished its cards -> announce so team scoring can resolve.
+          if (!state.botHands[sid].length) {
+            var order = state.finishOrder.slice();
+            if (order.indexOf(sid) === -1) order.push(sid);
+            sendGame({ kind: 'finished', round: state.roundNo, by: sid, order: order });
+          }
+        }
+        // Published. Arm the safety net in case the echo never comes back.
+        armBotWatchdog(sid);
+      } catch (e) {
+        // sendGame/buildMessage failed (e.g. transient key/wrap error). Do not
+        // leave the turn stuck: retry shortly; watchdog also covers this.
+        armBotWatchdog(sid);
       }
     }
 
