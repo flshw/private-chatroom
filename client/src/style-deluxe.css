@@ -222,3 +222,94 @@ BASE_STYLES_PLACEHOLDER
   .game-bottom{gap:8px;padding-top:6px}
   .game-bottom .tool-btn{min-width:0;flex:1 1 0}
 }
+
+/* ---------- Landscape phone adaptation (wide but SHORT viewport) ----------
+ * A phone in landscape is 740-932px WIDE but only 360-430px TALL, so it
+ * escapes the (max-width:720px) block above and falls back to desktop rules —
+ * whose ~476px of stacked content overflowed a ~270px panel, pushing the hand
+ * and the play/pass buttons BELOW the screen (untappable). This block keeps the
+ * desktop-style single-row top bar but repacks the game panel into two columns:
+ * left = counter/seats/table/hand/arrange, right = play log (spanning rows) +
+ * the play/pass buttons. Total content now fits the short height. */
+@media(orientation:landscape) and (max-height:520px){
+  /* Top bar stays ONE row on a wide screen; just enlarge touch targets. */
+  .topbar{display:flex!important;gap:8px;padding:7px 12px}
+  .topbar .room-name{max-width:34vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
+  .topbar .room-name .deluxe-badge{display:none}
+  .topbar .tool-btn,.topbar .icon{min-height:44px}
+  .members{top:58px!important;bottom:52px!important;width:62%!important}
+
+  /* Chat: trim vertical padding so the message list keeps usable height. */
+  .messages{padding:8px 12px}
+  .composer{padding:6px 10px;gap:6px}
+  .composer .icon{min-height:44px}
+  .composer input[type=text]{font-size:16px;padding:8px 10px}
+  #btn-send{min-height:44px}
+
+  /* PiP video parks top-right (draggable); never on the button row. */
+  #pip-video{width:160px;right:8px;bottom:auto;top:60px}
+  #pip-head{touch-action:none}
+
+  /* The whole game panel becomes a short, two-column grid. */
+  #game-panel{inset:58px 0 50px 0;padding:5px 10px;gap:4px;
+    display:grid;overflow:hidden;
+    grid-template-columns:minmax(0,1fr) 172px;
+    grid-template-rows:auto auto minmax(40px,1fr) minmax(0,80px) 44px;
+    grid-template-areas:
+      "counter counter"
+      "seats   seats"
+      "table   log"
+      "hand    log"
+      "actions bottom";
+    background:linear-gradient(180deg,rgba(9,14,28,.99),rgba(9,14,28,.985) 55%,rgba(9,14,28,.99))}
+
+  /* Counter: one scrollable row instead of two wrapped rows. */
+  #card-counter{grid-area:counter;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;
+    padding:4px 6px;margin:0;gap:4px;min-height:0}
+  #card-counter .cc-title{font-size:11px;position:sticky;left:0;z-index:1;
+    background:rgba(10,14,28,.96);padding-right:4px}
+  .cc-rank{font-size:11px;min-width:30px;padding:2px 4px;flex:0 0 auto}
+
+  /* Title row is redundant with the toolbar's 掼蛋 button on a short screen. */
+  .game-top{display:none}
+  #spectator-note{position:absolute;top:2px;left:10px;right:10px;z-index:10;
+    grid-column:auto;padding:4px 8px;font-size:11px}
+
+  .game-seats{grid-area:seats;grid-template-columns:repeat(4,1fr);gap:5px;margin:0;min-height:0}
+  .seat{padding:3px 4px;font-size:11px}
+  .seat .cnt{margin-top:1px}
+
+  .game-table{grid-area:table;width:100%;max-width:none;min-height:0;max-height:none;height:100%;
+    margin:0;padding:4px;gap:3px;overflow:auto;align-content:center}
+  .game-table .tip{font-size:12px}
+  .game-table>.pcard{width:30px;height:42px;font-size:12px}
+  .game-table>.pcard .suit{font-size:14px;margin-top:1px}
+  .game-table>.pcard .pip{font-size:8px;left:3px;top:2px}
+  .game-table>.pcard .pip b,.game-table>.pcard .pip i{font-size:9px}
+
+  #my-hand{grid-area:hand;justify-content:safe center;gap:5px;padding:12px 6px 4px;
+    min-height:0;max-height:none;height:100%;margin:0;overflow:auto;-webkit-overflow-scrolling:touch}
+  .pcard{width:30px;height:44px;font-size:12px}
+  .pcard .suit{font-size:14px;margin-top:1px}
+  .pcard .pip{font-size:8px;left:3px;top:2px}
+  .pcard .pip b,.pcard .pip i{font-size:9px}
+  .pcard-stack>.pcard{left:calc(6px * var(--i, 0));top:calc(12px * var(--i, 0))}
+
+  /* Play log occupies the right column across the table+hand rows — it no
+   * longer floats over the seats or played cards. */
+  .game-log{grid-area:log;position:static;transform:none;width:auto;height:100%;max-height:none;
+    left:auto;top:auto;margin:0;padding:6px 8px;font-size:11px;line-height:1.4;
+    overflow:auto;z-index:auto}
+  .game-log:before{font-size:11px;margin-bottom:4px;padding-bottom:4px}
+
+  /* Arrange/flatten (left) and Pass/Play (right) share ONE 44px row. */
+  .game-actions{grid-area:actions;justify-content:flex-start;align-items:stretch;
+    gap:6px;padding:0;margin:0;flex-wrap:nowrap}
+  .game-actions>span{display:none}
+  .game-bottom{grid-area:bottom;gap:6px;padding:0;margin:0;border:0;align-items:stretch}
+  .game-actions .tool-btn,.game-bottom .tool-btn{min-height:44px;min-width:0;
+    font-size:12px;padding:6px 10px;flex:1 1 0}
+
+  /* Modals must fit the short height. */
+  #game-setup,.spectate-picker{padding:12px;gap:8px;max-height:92vh;overflow:auto}
+}

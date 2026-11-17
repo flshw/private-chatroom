@@ -159,7 +159,12 @@ const deluxeMarkers = baseMarkers.concat([
   ['PiP触摸拖拽', 'head.addEventListener(\'pointerdown\', down)'],
   ['录音状态反馈', 'b.classList.toggle(\'recording\', state === true)'],
   ['触摸无粘滞悬停', '@media(hover:hover)'],
-  ['输入字号防iOS缩放', '.composer input[type=text]{min-width:88px;padding:10px 11px;font-size:16px}']
+  ['输入字号防iOS缩放', '.composer input[type=text]{min-width:88px;padding:10px 11px;font-size:16px}'],
+  /* Landscape phone adaptation — short/wide viewport must repack the game
+   * panel into two columns so hand + play/pass buttons stay on-screen. */
+  ['横屏专用布局', '@media(orientation:landscape) and (max-height:520px)'],
+  ['横屏两列网格', 'grid-template-areas:'],
+  ['横屏堆叠尺寸', 'landscape) and (max-height:520px)\').matches)']
 ]);
 build('豪华版', deluxeParts, deluxeMarkers, 'client/dist/private-chat-deluxe.template.html');
 

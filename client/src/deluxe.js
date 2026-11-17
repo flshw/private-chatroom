@@ -188,12 +188,18 @@ window.PCDeluxe = (function () {
       // top-left rank+suit pip, so a player can read and tap a single card.
       var stack = document.createElement('div');
       stack.className = 'pcard-stack';
-      // Footprint must match the CURRENT card size. On phones the cards shrink
-      // (36x52) and step by 8/18 via CSS; using desktop numbers here left big
-      // gaps and needless horizontal overflow. Read the rendered card metrics.
+      // Footprint must match the CURRENT card size. Cards shrink on portrait
+      // phones (36x52 / 8/18) and again on short landscape screens (30x44 /
+      // 6/12); desktop numbers here would leave big gaps and waste the little
+      // vertical room a landscape phone has. Keep these in sync with the CSS
+      // media queries (max-width:720px and orientation:landscape+max-height).
       var cardW = 44, cardH = 62, stepX = 10, stepY = 22;
-      if (window.matchMedia && window.matchMedia('(max-width:720px)').matches) {
-        cardW = 36; cardH = 52; stepX = 8; stepY = 18;
+      if (window.matchMedia) {
+        if (window.matchMedia('(orientation:landscape) and (max-height:520px)').matches) {
+          cardW = 30; cardH = 44; stepX = 6; stepY = 12;
+        } else if (window.matchMedia('(max-width:720px)').matches) {
+          cardW = 36; cardH = 52; stepX = 8; stepY = 18;
+        }
       }
       // Reserve the fanned footprint so cards don't overflow the hand row.
       stack.style.width = (cardW + stepX * (g.cards.length - 1)) + 'px';
