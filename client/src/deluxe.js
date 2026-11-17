@@ -699,29 +699,51 @@ window.PCDeluxe = (function () {
   function initMarquee() {
     var hand = $('my-hand');
     if (!hand) return;
-    var dragging = false, sx = 0, sy = 0, rect = null;
+    var dragging = false, pending = false, sx = 0, sy = 0, rect = null;
+    var DRAG_TH = 6; // px: below this it's a tap (card selects itself), above = marquee
 
     function inside(boxEl, x, y) {
       return boxEl && x >= boxEl.left && x <= boxEl.right && y >= boxEl.top && y <= boxEl.bottom;
     }
+    /* Convert a pointer's viewport coords to coords inside #my-hand's CONTENT
+     * box. The marquee is absolutely positioned inside #my-hand (which is
+     * position:relative), so its left/top are content coords and MUST include
+     * scrollLeft/scrollTop — otherwise the box appears offset from the cards
+     * whenever the hand has been scrolled (the "框选区不在纸牌区" symptom). */
+    function local(e) {
+      var r = hand.getBoundingClientRect();
+      return {
+        x: e.clientX - r.left + hand.scrollLeft,
+        y: e.clientY - r.top + hand.scrollTop,
+        maxX: hand.scrollWidth,
+        maxY: hand.scrollHeight
+      };
+    }
     function down(e) {
       if (!marqueeOn || !game || game.state.spectator) return;
-      // Ignore drags that start on a card or a button — those are taps.
-      if (e.target && (e.target.closest && e.target.closest('.pcard,button'))) return;
-      var r = hand.getBoundingClientRect();
-      sx = e.clientX - r.left; sy = e.clientY - r.top;
-      dragging = true;
-      rect = document.createElement('div'); rect.className = 'hand-marquee';
-      rect.style.left = sx + 'px'; rect.style.top = sy + 'px';
-      rect.style.width = '0px'; rect.style.height = '0px';
-      hand.appendChild(rect);
-      e.preventDefault();
+      // Buttons keep their own click behaviour. Cards are ALLOWED as a drag
+      // start: we only begin the marquee past DRAG_TH, so a plain tap still
+      // selects that single card via cardEl's own click handler.
+      if (e.target && (e.target.closest && e.target.closest('button'))) return;
+      var p = local(e);
+      sx = p.x; sy = p.y;
+      pending = true; dragging = false;
+      e.preventDefault(); // stop native drag/scroll from stealing the gesture
     }
     function move(e) {
-      if (!dragging || !rect) return;
-      var r = hand.getBoundingClientRect();
-      var cx = Math.max(0, Math.min(r.width, e.clientX - r.left));
-      var cy = Math.max(0, Math.min(r.height, e.clientY - r.top));
+      if (!pending) return;
+      var p = local(e);
+      var cx = Math.max(0, Math.min(p.maxX, p.x));
+      var cy = Math.max(0, Math.min(p.maxY, p.y));
+      if (!dragging) {
+        if (Math.abs(cx - sx) < DRAG_TH && Math.abs(cy - sy) < DRAG_TH) return;
+        // Crossed the threshold: create the box anchored at the start point.
+        dragging = true;
+        rect = document.createElement('div'); rect.className = 'hand-marquee';
+        rect.style.left = Math.min(sx, cx) + 'px'; rect.style.top = Math.min(sy, cy) + 'px';
+        rect.style.width = Math.abs(cx - sx) + 'px'; rect.style.height = Math.abs(cy - sy) + 'px';
+        hand.appendChild(rect);
+      }
       rect.style.left = Math.min(sx, cx) + 'px';
       rect.style.top = Math.min(sy, cy) + 'px';
       rect.style.width = Math.abs(cx - sx) + 'px';
@@ -729,6 +751,10 @@ window.PCDeluxe = (function () {
       e.preventDefault();
     }
     function up() {
+      // A plain tap (never crossed the threshold) is left to cardEl's click
+      // handler so single-card select/deselect still works while 框选 is on.
+      if (!pending) return;
+      pending = false;
       if (!dragging) return;
       dragging = false;
       if (rect) {

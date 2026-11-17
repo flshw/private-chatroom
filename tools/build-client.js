@@ -231,7 +231,17 @@ const deluxeMarkers = baseMarkers.concat([
   ['结算面板样式', '#game-settle-mask{position:fixed'],
   /* seq竞态: 发送队列串行化, 修复同tick PLAY/FINISHED 同seq的 E_REPLAY */
   ['seq发送队列', 'function enqueueSend(task)'],
-  ['seq队列串行调用', 'return enqueueSend(function () { return sendKindNow(plaintext, kind); });']
+  ['seq队列串行调用', 'return enqueueSend(function () { return sendKindNow(plaintext, kind); });'],
+  /* v21: 红桃级牌万能牌接入 + 框选定位修复 + 牌局动态滚动条 */
+  ['万能牌引擎isWild', "function isWild(card, level) { return card.s === 'H' && card.r === level; }"],
+  ['万能牌引擎枚举替换', 'function classify(cards, level) {'],
+  ['万能牌机器人候选', 'function addWildCandidates(hand, level, G, addDirect)'],
+  ['万能牌补缺调用', 'addWildCandidates(hand, level, G, addDirect);'],
+  ['框选手牌定位容器', '.my-hand{position:relative'],
+  ['框选滚动坐标修正', 'x: e.clientX - r.left + hand.scrollLeft'],
+  ['框选拖拽阈值', 'DRAG_TH = 6'],
+  ['牌局动态半透明背景', 'background:rgba(10,16,34,.5)'],
+  ['牌局动态常显滚动条', 'overflow-y:scroll;overflow-x:hidden']
 ]);
 build('豪华版', deluxeParts, deluxeMarkers, 'client/dist/private-chat-deluxe.template.html');
 

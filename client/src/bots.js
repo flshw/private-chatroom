@@ -259,7 +259,95 @@
         maybe(cs);
       });
     });
+    // Wild (red level card) gap-filling — see addWildCandidates(). Pattern
+    // descriptors are built directly (no classify enumeration) for speed.
+    function addDirect(cs, pattern) {
+      var k = key(cs);
+      if (seen[k]) return;
+      seen[k] = true;
+      out.push({ cards: cs.slice(), pattern: pattern });
+    }
+    addWildCandidates(hand, level, G, addDirect);
     return out;
+  }
+
+  /* Red level cards (逢人配 / wild) can stand in for ANY non-joker card.
+   * PCGame.classify() already resolves a wild inside a card set to its
+   * strongest legal pattern — but candidates() enumerates plays by REAL rank,
+   * and a wild's real rank is `level` (e.g. 15 when playing 2), which is
+   * excluded from straights (rank<=14). So the bot could never SEE a play like
+   * 3-4-[red 2]-6-7 = straight, and would pass holding a winning hand.
+   *
+   * This generator adds card sets where wilds FILL THE GAPS of every pattern
+   * family. We KNOW the resulting pattern (family + top rank) by construction,
+   * so we build its descriptor directly instead of calling classify() — the
+   * latter enumerates 52^k wild substitutions and is far too slow when called
+   * for hundreds of candidates per bot turn. */
+  function addWildCandidates(hand, level, G, addDirect) {
+    if (!G.isWild) return;
+    var wilds = hand.filter(function (c) { return G.isWild(c, level); });
+    if (!wilds.length) return;
+    var base = hand.filter(function (c) { return !G.isWild(c, level); });
+    var nw = wilds.length;
+    var T = G.TYPE, TN = G.TYPE_NAME;
+    function pat(type, rank, len) {
+      return { type: type, rank: G.cmpVal(rank, level), len: len, name: TN[type] };
+    }
+
+    // (A) Same-rank groups: 1 real + wild = pair, 2 real + wild = triple,
+    //     3 real + wild = bomb (and 2 real + 2 wild = bomb).
+    for (var r = 3; r <= 15; r++) {
+      var have = pickRank(base, r, 4);
+      if (!have.length) continue;
+      for (var target = 2; target <= 4; target++) {
+        var need = target - have.length;
+        if (need >= 1 && need <= nw) {
+          var cards = have.slice(0, Math.min(have.length, target)).concat(wilds.slice(0, need));
+          var type = target === 2 ? T.PAIR : target === 3 ? T.TRIPLE : T.BOMB;
+          addDirect(cards, pat(type, r, target));
+        }
+      }
+    }
+
+    // (B) Runs where wilds fill missing ranks. perRank=1 straight, 2 double
+    // straight (连对), 3 triple straight (钢板); suit != null -> straight flush.
+    function fillRun(run, perRank, type, suit) {
+      var cs = [], missing = 0;
+      for (var i = 0; i < run.length; i++) {
+        var r = run[i];
+        var avail = base.filter(function (c) {
+          return c.r === r && c.r <= 14 && (!suit || c.s === suit);
+        });
+        var take = Math.min(perRank, avail.length);
+        cs = cs.concat(avail.slice(0, take));
+        missing += perRank - take;
+      }
+      if (missing >= 1 && missing <= nw && cs.length + missing === run.length * perRank) {
+        var cards = cs.concat(wilds.slice(0, missing));
+        addDirect(cards, pat(type, run[run.length - 1], cards.length));
+      }
+    }
+    // Straight flushes FIRST: they share the same 5 cards as a plain straight
+    // and addDirect() de-dupes by card ids, so the stronger pattern must claim
+    // the key first (otherwise a plain straight shadows the straight flush).
+    ['S', 'H', 'C', 'D'].forEach(function (suit) {
+      for (var len = 5; len <= 12; len++) {
+        for (var start = 3; start + len - 1 <= 14; start++) {
+          var run = [];
+          for (var k = 0; k < len; k++) run.push(start + k);
+          fillRun(run, 1, T.STFLUSH, suit);           // straight flush
+        }
+      }
+    });
+    for (var len = 5; len <= 12; len++) {
+      for (var start = 3; start + len - 1 <= 14; start++) {
+        var run = [];
+        for (var k = 0; k < len; k++) run.push(start + k);
+        fillRun(run, 1, T.STRAIGHT, null);             // straight
+        if (len >= 3) fillRun(run, 2, T.DOUBLE_STRAIGHT, null); // 连对
+        if (len >= 2) fillRun(run, 3, T.TRIPLE_STRAIGHT, null); // 钢板
+      }
+    }
   }
 
   function isBomb(g) { return !!BOMB_WEIGHT[g.pattern.type]; }
