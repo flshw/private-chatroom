@@ -104,7 +104,7 @@ const deluxeMarkers = baseMarkers.concat([
   ['刷新自动续进', 'var nick = savedNickname();'],
   ['两版通用续进', 'if (cached && nick) {'],
   ['四人开局门槛', 'membersList.length >= 4'],
-  ['三人选座开局', 'game.requestStart([mySid].concat(picked));'],
+  ['三人选座开局', 'game.requestStart([mySid].concat(picked), partner);'],
   ['记牌器面板', 'id="card-counter"'],
   ['选座面板', 'id="game-setup"'],
   ['选人弹窗遮罩', 'id="game-setup-mask"'],
@@ -206,7 +206,32 @@ const deluxeMarkers = baseMarkers.concat([
    * panel into two columns so hand + play/pass buttons stay on-screen. */
   ['横屏专用布局', '@media(orientation:landscape) and (max-height:520px)'],
   ['横屏两列网格', 'grid-template-areas:'],
-  ['横屏堆叠尺寸', 'landscape) and (max-height:520px)\').matches)']
+  ['横屏堆叠尺寸', 'landscape) and (max-height:520px)\').matches)'],
+  /* v20: full-round settlement + next round + partner pick + per-seat display */
+  ['结算四位名次', "var RANK_TITLES = ['大科', '二科', '二拉', '大拉']"],
+  ['结算收官函数', 'function finishRound()'],
+  ['三人出局才结算', 'state.finishOrder.length >= 3) finishRound()'],
+  ['下一局接口', 'self.nextRound = nextRound'],
+  ['新一局递增局号', 'state.roundNo = (state.roundNo || 0) + 1'],
+  ['对家随发牌广播', 'partner: state.partnerSid'],
+  ['选对家接口', 'function requestStart(players, partnerSid)'],
+  ['选对家UI', 'id="partner-picks"'],
+  ['对家座位排布', 'seat2 (opposite) becomes the teammate'],
+  ['结算面板UI', 'id="game-settle"'],
+  ['确认下一局按钮', 'id="btn-settle-next"'],
+  ['结算面板渲染', 'function renderSettle(st)'],
+  ['每座位最后出牌', 'state.seatPlays[msg.by] = { cards:'],
+  ['每座位出牌展示', "className = 'seat-play'"],
+  ['过牌座位标记', "state.seatPlays[by] = { cards: [], passed: true }"],
+  ['低牌数显示', "'剩 ' + left + ' 张'"],
+  ['每堆全选按钮', "className = 'stack-all'"],
+  ['框选开关', "id=\"btn-game-marquee\""],
+  ['框选实现', 'function initMarquee()'],
+  ['框选覆盖层样式', '.hand-marquee{position:absolute'],
+  ['结算面板样式', '#game-settle-mask{position:fixed'],
+  /* seq竞态: 发送队列串行化, 修复同tick PLAY/FINISHED 同seq的 E_REPLAY */
+  ['seq发送队列', 'function enqueueSend(task)'],
+  ['seq队列串行调用', 'return enqueueSend(function () { return sendKindNow(plaintext, kind); });']
 ]);
 build('豪华版', deluxeParts, deluxeMarkers, 'client/dist/private-chat-deluxe.template.html');
 

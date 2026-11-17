@@ -8,8 +8,11 @@
 window.PCDeluxe = (function () {
   var game = null, ctx = null, voiceOn = false, selected = {};
   var membersList = [], mySid = null, picked = [], setupOpen = false;
+  var partnerPick = null;   // sid of chosen 对家 (teammate)
   var spread = false; // false = stacked by rank (default), true = flat
+  var marqueeOn = false; // drag box-select mode
   var lastTableSig = ''; // signature of the last rendered table, for play animation
+  var settleShownFor = null; // round number whose settlement panel is currently shown
   var $ = function (id) { return document.getElementById(id); };
 
   function bind(o) {
@@ -33,6 +36,7 @@ window.PCDeluxe = (function () {
     picked = picked.filter(function (s) {
       return membersList.some(function (m) { return m.sid === s; });
     });
+    if (partnerPick && picked.indexOf(partnerPick) === -1) partnerPick = null;
     var btn = $('btn-game');
     if (btn) {
       var enough = membersList.length >= 4;
@@ -76,6 +80,7 @@ window.PCDeluxe = (function () {
     } else {
       picked = [];
     }
+    partnerPick = picked.length >= 2 ? picked[1] : null;
   }
 
   /* Exactly one other seat per click, up to three. */
@@ -86,6 +91,13 @@ window.PCDeluxe = (function () {
       if (picked.length >= 3) { if (ctx) ctx.toast('只能选择另外 3 名玩家'); return; }
       picked.push(sid);
     }
+    if (partnerPick && picked.indexOf(partnerPick) === -1) partnerPick = null;
+    renderSetup();
+  }
+
+  function togglePartner(sid) {
+    if (picked.indexOf(sid) === -1) return;
+    partnerPick = (partnerPick === sid) ? null : sid;
     renderSetup();
   }
 
@@ -103,6 +115,25 @@ window.PCDeluxe = (function () {
       b.onclick = function () { togglePick(m.sid); };
       box.appendChild(b);
     });
+    // Partner picker: only the three chosen players can be 对家.
+    var pbox = $('partner-picks');
+    if (pbox) {
+      pbox.innerHTML = '';
+      var effective = partnerPick || picked[1];
+      picked.forEach(function (sid) {
+        var m = membersList.filter(function (x) { return x.sid === sid; })[0];
+        var b = document.createElement('button');
+        b.className = 'partner-chip' + (effective === sid ? ' on' : '');
+        b.textContent = (effective === sid ? '✓ 对家 · ' : '') + ((m && m.nickname) || sid);
+        b.onclick = function () { togglePartner(sid); };
+        pbox.appendChild(b);
+      });
+      if (!picked.length) {
+        var hint = document.createElement('span');
+        hint.className = 'setup-title'; hint.textContent = '请先选择玩家';
+        pbox.appendChild(hint);
+      }
+    }
     var btn = $('btn-game-start');
     if (btn) btn.textContent = '开局（' + picked.length + '/3）';
   }
@@ -177,6 +208,15 @@ window.PCDeluxe = (function () {
         renderGame(game.state);
       };
     }
+    function allGroupSelected(g) {
+      return g.cards.every(function (c) { return !!selected[c.id]; });
+    }
+    function toggleGroup(g) {
+      if (readonly) return;
+      var on = !allGroupSelected(g);
+      g.cards.forEach(function (c) { selected[c.id] = on; });
+      renderGame(game.state);
+    }
     groups.forEach(function (g) {
       if (spread || g.cards.length === 1) {
         g.cards.forEach(function (c) {
@@ -212,6 +252,15 @@ window.PCDeluxe = (function () {
         stack.appendChild(el);
       });
       stack.title = (RANK_LABEL[g.rank] || g.rank) + ' × ' + g.cards.length + '（点单张牌可选/取消）';
+      // "全选" under each same-rank stack: tap to select/deselect the whole
+      // group in one action (the user asked for a per-group select-all).
+      if (!readonly) {
+        var allBtn = document.createElement('button');
+        allBtn.className = 'stack-all';
+        allBtn.textContent = allGroupSelected(g) ? '取消全选' : '全选 ×' + g.cards.length;
+        allBtn.onclick = function (e) { if (e) e.stopPropagation(); toggleGroup(g); };
+        stack.appendChild(allBtn);
+      }
       hand.appendChild(stack);
     });
     // Restore the horizontal scroll offset captured above so tapping a card
@@ -246,23 +295,102 @@ window.PCDeluxe = (function () {
     });
   }
 
+  /* Settlement overlay: four ranks (大科/二科/二拉/大拉) + confirm-to-continue.
+   * Shown once per round; rebuilt only when the round number changes so the
+   * user's reading isn't interrupted by unrelated re-renders. */
+  function renderSettle(st) {
+    var box = $('game-settle'), mask = $('game-settle-mask');
+    if (!box || !mask) return;
+    var show = st.phase === 'finished' && !!st.result;
+    if (!show) {
+      box.classList.add('hidden'); mask.classList.add('hidden');
+      settleShownFor = null;
+      return;
+    }
+    box.classList.remove('hidden'); mask.classList.remove('hidden');
+    if (settleShownFor === st.roundNo) return; // already painted this round
+    settleShownFor = st.roundNo;
+    var res = st.result;
+    var title = $('settle-title');
+    if (title) title.textContent = '🏁 第 ' + (res.round || st.roundNo) + ' 局结算 · 打 ' + game.rankName(res.levelAfter);
+    var sub = $('settle-sub');
+    if (sub) {
+      var partnerName = (st.seats.filter(function (s) { return s.sid === res.partnerSid; })[0] || {}).nickname || '对家';
+      sub.textContent = (res.win ? '🎉 本队获胜 · 升 ' + res.delta + ' 级 → 打 ' + game.rankName(res.levelAfter)
+        : '对方领先 · 打 ' + game.rankName(res.levelAfter)) +
+        ' · 对家 ' + partnerName + ' · 下一局打 ' + game.rankName(res.levelAfter);
+    }
+    var list = $('settle-ranks');
+    if (list) {
+      list.innerHTML = '';
+      (res.ranks || []).forEach(function (r) {
+        var row = document.createElement('div');
+        row.className = 'settle-row' + (r.isMe ? ' me' : '');
+        var b = document.createElement('span'); b.className = 'badge-rank'; b.textContent = r.title;
+        var who = document.createElement('span'); who.className = 'who';
+        who.textContent = r.nickname + (r.isMe ? '（我）' : '');
+        var tag = document.createElement('span'); tag.className = 'tag' + (r.teammate ? ' mate' : '');
+        tag.textContent = r.teammate ? '本队' : '对方';
+        row.appendChild(b); row.appendChild(who); row.appendChild(tag);
+        list.appendChild(row);
+      });
+    }
+    var next = $('btn-settle-next');
+    if (next) {
+      var host = game.mySid && st.hostSid === game.mySid();
+      next.textContent = host ? '确认 · 开始第 ' + ((res.round || st.roundNo) + 1) + ' 局（打 ' + game.rankName(res.levelAfter) + '）'
+        : '等待房主开始下一局';
+      next.disabled = !host;
+    }
+  }
+
   function renderGame(st) {
     var seats = $('game-seats'), table = $('game-table'), hand = $('my-hand'), log = $('game-log');
     if (!seats || !table || !hand) return;
     if (!$('game-panel') || $('game-panel').classList.contains('hidden')) return;
     if (st.phase === 'playing' || st.phase === 'dealing' || st.spectator) showSetup(false);
     renderCounter(st);
-    // Seats
+    // Seats — each player has a DISTINCT position showing their nickname,
+    // remaining card count (highlighted when < 10) and their last play THIS
+    // trick. This makes "谁出了什么" readable without guessing from one pile.
     seats.innerHTML = '';
     for (var i = 0; i < 4; i++) {
       var s = st.seats[i];
       var el = document.createElement('div');
       el.className = 'seat' + (s && s.isMe ? ' me' : '') + (st.turn && s && st.turn === s.sid ? ' turn' : '');
       var nm = document.createElement('div');
-      nm.textContent = s ? (s.nickname + (s.isMe ? '（我）' : '')) : '空位';
+      var role = '';
+      if (s && st.partnerSid === s.sid) role = ' · 对家';
+      nm.textContent = s ? (s.nickname + (s.isMe ? '（我）' : '') + role) : '空位';
       var cnt = document.createElement('div'); cnt.className = 'cnt';
-      cnt.textContent = s ? (st.phase === 'dealing' ? '发牌中' : '·') : '—';
-      el.appendChild(nm); el.appendChild(cnt); seats.appendChild(el);
+      if (s && st.phase !== 'idle' && st.phase !== 'dealing') {
+        var left = (game && game.remainingOf) ? game.remainingOf(s.sid) : null;
+        if (left === 0) { cnt.textContent = '出完'; cnt.classList.add('out'); }
+        else if (left !== null && left < 10) { cnt.textContent = '剩 ' + left + ' 张'; cnt.classList.add('low'); }
+        else cnt.textContent = left !== null ? (left + ' 张') : '·';
+      } else {
+        cnt.textContent = s ? (st.phase === 'dealing' ? '发牌中' : '·') : '—';
+      }
+      el.appendChild(nm); el.appendChild(cnt);
+      // Per-seat last play (compact face labels) so each position is distinct.
+      var sp = document.createElement('div'); sp.className = 'seat-play';
+      var play = st.seatPlays && st.seats[i] ? st.seatPlays[s.sid] : null;
+      if (play && play.cards && play.cards.length) {
+        var lab = document.createElement('span'); lab.className = 'sp-label';
+        lab.textContent = (play.pattern && (play.pattern.name || play.pattern.type)) || '出';
+        sp.appendChild(lab);
+        play.cards.forEach(function (c) {
+          var cc = document.createElement('span'); cc.className = 'sp-card' +
+            ((c.s === 'H' || c.s === 'D') ? ' red' : '');
+          cc.textContent = (RANK_LABEL[c.r] || c.r) + (c.s === 'W' ? '' : ({ S: '♠', H: '♥', C: '♣', D: '♦' }[c.s] || ''));
+          sp.appendChild(cc);
+        });
+      } else if (play && play.passed) {
+        var ps = document.createElement('span'); ps.className = 'sp-pass'; ps.textContent = '过';
+        sp.appendChild(ps);
+      }
+      el.appendChild(sp);
+      seats.appendChild(el);
     }
     // Table (last play). Animate only when the play actually CHANGES; ordinary
     // re-renders (turn highlight, note, timer) keep the same signature so cards
@@ -320,10 +448,11 @@ window.PCDeluxe = (function () {
       btnPass.classList.toggle('muted', !myTurn || !st.table);
     }
     var btnStart = $('btn-game-start');
-    if (btnStart) btnStart.classList.toggle('hidden', st.phase === 'playing' || st.spectator);
+    if (btnStart) btnStart.classList.toggle('hidden', st.phase === 'playing' || st.phase === 'finished' || st.spectator);
     if (log) { log.innerHTML = ''; st.log.slice(-12).forEach(function (t) {
       var d = document.createElement('div'); d.textContent = t; log.appendChild(d);
     }); log.scrollTop = log.scrollHeight; }
+    renderSettle(st);
   }
 
   function toggleGame() {
@@ -337,11 +466,11 @@ window.PCDeluxe = (function () {
     p.classList.toggle('hidden');
     if (opening) {
       syncSeats();
-      if (game && !game.state.spectator &&
-          (game.state.phase === 'idle' || game.state.phase === 'finished')) {
+      if (game && !game.state.spectator && game.state.phase === 'idle') {
         autoPick();
         showSetup(true);
       } else {
+        // finished phase is handled by the settlement overlay, not the picker
         showSetup(false);
       }
       if (game) renderGame(game.state);
@@ -384,7 +513,9 @@ window.PCDeluxe = (function () {
     // Close the picker immediately; the deal frame will render the next round.
     showSetup(false);
     // Everyone applies the same seat list; only the selected host deals.
-    game.requestStart([mySid].concat(picked));
+    // The chosen 对家 is passed so seat2 (opposite) becomes the teammate.
+    var partner = partnerPick || picked[1];
+    game.requestStart([mySid].concat(picked), partner);
   }
 
   /* Choose exactly ONE player to watch. Once locked by the server it cannot
@@ -561,6 +692,78 @@ window.PCDeluxe = (function () {
     } catch (e) { ctx && ctx.toast('下载失败，请使用复制功能'); }
   }
 
+  /* ---- Drag box-select (画框多选) over the hand row ----
+   * Pointer Events cover mouse+touch. When active, dragging on empty hand
+   * space draws a rectangle; cards whose CENTER falls inside are selected.
+   * Tapping an individual card still toggles it (handled by cardEl onClick). */
+  function initMarquee() {
+    var hand = $('my-hand');
+    if (!hand) return;
+    var dragging = false, sx = 0, sy = 0, rect = null;
+
+    function inside(boxEl, x, y) {
+      return boxEl && x >= boxEl.left && x <= boxEl.right && y >= boxEl.top && y <= boxEl.bottom;
+    }
+    function down(e) {
+      if (!marqueeOn || !game || game.state.spectator) return;
+      // Ignore drags that start on a card or a button — those are taps.
+      if (e.target && (e.target.closest && e.target.closest('.pcard,button'))) return;
+      var r = hand.getBoundingClientRect();
+      sx = e.clientX - r.left; sy = e.clientY - r.top;
+      dragging = true;
+      rect = document.createElement('div'); rect.className = 'hand-marquee';
+      rect.style.left = sx + 'px'; rect.style.top = sy + 'px';
+      rect.style.width = '0px'; rect.style.height = '0px';
+      hand.appendChild(rect);
+      e.preventDefault();
+    }
+    function move(e) {
+      if (!dragging || !rect) return;
+      var r = hand.getBoundingClientRect();
+      var cx = Math.max(0, Math.min(r.width, e.clientX - r.left));
+      var cy = Math.max(0, Math.min(r.height, e.clientY - r.top));
+      rect.style.left = Math.min(sx, cx) + 'px';
+      rect.style.top = Math.min(sy, cy) + 'px';
+      rect.style.width = Math.abs(cx - sx) + 'px';
+      rect.style.height = Math.abs(cy - sy) + 'px';
+      e.preventDefault();
+    }
+    function up() {
+      if (!dragging) return;
+      dragging = false;
+      if (rect) {
+        var box = rect.getBoundingClientRect();
+        if (rect.parentNode) rect.parentNode.removeChild(rect);
+        rect = null;
+        var cards = hand.querySelectorAll('.pcard[data-id]');
+        for (var i = 0; i < cards.length; i++) {
+          var c = cards[i], cr = c.getBoundingClientRect();
+          if (inside(box, cr.left + cr.width / 2, cr.top + cr.height / 2)) {
+            selected[c.dataset.id] = true;
+          }
+        }
+        if (game) renderGame(game.state);
+      }
+    }
+    hand.addEventListener('pointerdown', down);
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
+  function toggleMarquee() {
+    marqueeOn = !marqueeOn;
+    var hand = $('my-hand');
+    if (hand) hand.classList.toggle('marquee-on', marqueeOn);
+    var b = $('btn-game-marquee');
+    if (b) { b.classList.toggle('on', marqueeOn); b.textContent = marqueeOn ? '▧ 框选·开' : '▧ 框选'; }
+    if (ctx) ctx.toast(marqueeOn ? '框选已开启：在手牌区拖拽画框选牌' : '框选已关闭');
+  }
+
+  function onSettleNext() {
+    if (!game) return;
+    game.nextRound(); // host redeals; non-host sees "等待房主" and just waits
+  }
+
   function wire() {
     $('btn-game') && $('btn-game').addEventListener('click', toggleGame);
     $('btn-game-start') && $('btn-game-start').addEventListener('click', onStartClick);
@@ -568,6 +771,7 @@ window.PCDeluxe = (function () {
     $('btn-game-pass') && $('btn-game-pass').addEventListener('click', onPassClick);
     $('btn-game-arrange') && $('btn-game-arrange').addEventListener('click', onArrangeClick);
     $('btn-game-spread') && $('btn-game-spread').addEventListener('click', onSpreadClick);
+    $('btn-game-marquee') && $('btn-game-marquee').addEventListener('click', toggleMarquee);
     $('btn-game-diag') && $('btn-game-diag').addEventListener('click', openDiag);
     $('btn-diag-close') && $('btn-diag-close').addEventListener('click', closeDiag);
     $('btn-diag-refresh') && $('btn-diag-refresh').addEventListener('click', refreshDiag);
@@ -576,9 +780,18 @@ window.PCDeluxe = (function () {
     $('btn-spectate') && $('btn-spectate').addEventListener('click', requestSpectate);
     $('btn-setup-close') && $('btn-setup-close').addEventListener('click', function () { showSetup(false); });
     $('game-setup-mask') && $('game-setup-mask').addEventListener('click', function () { showSetup(false); });
+    $('btn-settle-next') && $('btn-settle-next').addEventListener('click', onSettleNext);
+    $('btn-settle-close') && $('btn-settle-close').addEventListener('click', function () {
+      var b = $('game-settle'), m = $('game-settle-mask');
+      if (b) b.classList.add('hidden'); if (m) m.classList.add('hidden');
+    });
+    $('game-settle-mask') && $('game-settle-mask').addEventListener('click', function () {
+      var b = $('game-settle'); if (b) b.classList.add('hidden'); this.classList.add('hidden');
+    });
     $('btn-voice-live') && $('btn-voice-live').addEventListener('click', toggleVoice);
     $('btn-pip-close') && $('btn-pip-close').addEventListener('click', pipClear);
     initPiPDrag();
+    initMarquee();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
   else wire();

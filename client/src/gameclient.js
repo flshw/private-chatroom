@@ -77,6 +77,7 @@ window.PCGameClient = (function () {
         '阶段=' + state.phase + ' 局=' + state.roundNo + ' 级=' + rankName(state.level),
         '座位=' + JSON.stringify(state.seats.map(function (s) { return (s.sid || '') + (s.isBot ? '(bot)' : ''); })),
         '当前回合=' + state.turn + ' 机器人手牌=' + botHandSizes(),
+        '对家=' + (state.partnerSid || '-') + ' 我的座位=' + state.mySeat,
         '完成次序=' + JSON.stringify(state.finishOrder) + ' 桌面牌=' + (state.tablePattern ? (state.tablePattern.name || state.tablePattern.type) : '无'),
         '机器人开关=' + botsEnabled + ' 旁观=' + state.spectator,
         '------------------------------'
@@ -99,13 +100,17 @@ window.PCGameClient = (function () {
       played: [],                     // every played card, for the card counter
       mySeat: -1,
       hostSid: null,
+      partnerSid: null,             // 对家 (teammate) chosen at deal time
       hand: [],                       // my cards
       table: null,                    // {cards, type, bySid}
       lastWinner: null,
       passes: 0,
       turn: null,
       finishOrder: [],
-      roundNo: 0,
+      result: null,                 // settlement snapshot once all ranks are known
+      seatPlays: {},                // sid -> {cards, pattern} — last play THIS trick, per seat
+      playedBySeat: {},             // sid -> count of cards played (for low-card display)
+      roundNo: 1,                   // 1-based; incremented by nextRound()
       spectator: false,               // true once MY watch request is approved
       spectate: [],                   // public spectator relations (all observers)
       myRelation: null,               // my relation as an observer (pending|approved)
@@ -191,9 +196,13 @@ window.PCGameClient = (function () {
       return state.seats.length;
     }
 
-    /* The starter picks the other three players. Everyone applies the same
-     * ordered seat list from the E2EE 'start' frame, so deals cannot diverge. */
-    function setPlayers(ids) {
+    /* The starter picks the other three players AND optionally names one of
+     * them 对家 (partner). Everyone applies the SAME ordered seat list from the
+     * E2EE 'start' frame, so deals cannot diverge. Seat order is
+     *   [host(seat0), opp(seat1), partner(seat2), opp(seat3)]
+     * so team-by-parity (0&2 vs 1&3) matches the chosen partnership.
+     * `partnerSid` is authoritative from the host; if absent, seat 2 is used. */
+    function setPlayers(ids, partnerSid) {
       if (!ids || ids.length !== 4) return false;
       var seen = {}, list = [];
       ids.forEach(function (sid) {
@@ -201,12 +210,20 @@ window.PCGameClient = (function () {
         seen[sid] = true; list.push(sid);
       });
       if (list.length !== 4) return false;
-      // Real humans first (lowest sid = deal host), then bots in fixed order.
-      list.sort(function (a, b) {
-        var ba = isBotSid(a) ? 1 : 0, bb = isBotSid(b) ? 1 : 0;
-        return ba - bb || a.localeCompare(b);
-      });
-      state.players = list;
+      var hostSid = list[0];
+      var partner = partnerSid && seen[partnerSid] && partnerSid !== hostSid ? partnerSid : null;
+      var rest = list.slice(1).filter(function (s) { return s !== partner; });
+      // seat1 / seat3 = the two opponents; partner sits opposite at seat2.
+      var ordered = [hostSid];
+      if (partner) {
+        ordered.push(rest[0] || null, partner, rest[1] || null);
+      } else {
+        ordered = ordered.concat(rest);
+      }
+      ordered = ordered.filter(Boolean);
+      if (ordered.length !== 4) return false;
+      state.players = ordered;
+      state.partnerSid = partner || ordered[2];
       syncSeats(); onUpdate(state);
       return true;
     }
@@ -259,6 +276,7 @@ window.PCGameClient = (function () {
       }
       return { kind: 'deal', round: state.roundNo, level: state.level, hands: wrapped,
         host: mySid, order: state.seats.map(function (s) { return s.sid; }),
+        partner: state.partnerSid,
         bots: state.seats.filter(function (s) { return s.isBot; }).map(function (s) { return s.sid; }),
         watchTargetOf: (function () {
           var m = {};
@@ -281,6 +299,8 @@ window.PCGameClient = (function () {
       state.table = null; state.tablePattern = null; state.passes = 0;
       state.lastWinner = null; state._passEchoSig = null;
       state.finishOrder = []; state.log = []; state.played = [];
+      state.result = null; state.seatPlays = {}; state.playedBySeat = {};   // fresh round
+      if (msg.partner) state.partnerSid = msg.partner;
       state.botHands = state.botHands || {};
       if (msg.order && msg.order.length === 4) state.players = msg.order.slice();
       syncSeats();
@@ -361,6 +381,7 @@ window.PCGameClient = (function () {
       // credit the counter, and repaint — no waiting for the E2EE round trip.
       // Turn/table/log are left to onPlay(broadcast) as the single source of truth.
       state.hand = state.hand.filter(function (c) { return cardIds.indexOf(c.id) === -1; });
+      state.playedBySeat[mySid] = (state.playedBySeat[mySid] || 0) + sel.length;
       sel.forEach(function (c) {
         if (!state.played.some(function (p) { return p.id === c.id; })) state.played.push(c);
       });
@@ -368,6 +389,7 @@ window.PCGameClient = (function () {
       // as the tap; the broadcast's onPlay applies the identical cards/signature.
       state.table = { cards: msg.cards, type: pattern.type, bySid: mySid };
       state.tablePattern = pattern;
+      state.seatPlays[mySid] = { cards: msg.cards.slice(), pattern: pattern };
       state.passes = 0;
       state.lastWinner = mySid;   // a real play (not a pass) owns the trick
       onUpdate(state);
@@ -395,12 +417,14 @@ window.PCGameClient = (function () {
     function applyPass(by) {
       state.passes++;
       dlog('APPLY-PASS', 'by=' + by + ' passes=' + state.passes + '/' + (state.seats.length - 1 - state.finishOrder.length));
+      state.seatPlays[by] = { cards: [], passed: true };   // show 过 at this seat
       var seat = seatOfSid(by);
       try { note((by === mySid ? '你' : (state.seats[seat] ? state.seats[seat].nickname : '玩家')) + ' 过牌'); } catch (e) {}
       if (state.passes >= state.seats.length - 1 - state.finishOrder.length) {
         // New trick led by the player who actually PLAYED last (lastWinner),
         // never by the last passer. lastWinner is updated only on play().
         state.table = null; state.tablePattern = null; state.passes = 0;
+        state.seatPlays = {};   // new trick: clear each seat's displayed play
         var leadSid = state.lastWinner || by;
         // If that winner has already emptied their hand (finished), the lead
         // would land on a cardless seat and freeze the game. Hand it to the
@@ -439,6 +463,7 @@ window.PCGameClient = (function () {
         pattern = pattern || msg.pattern || null;
         state.table = { cards: msg.cards, type: pattern && pattern.type, bySid: msg.by };
         state.tablePattern = pattern;
+        state.seatPlays[msg.by] = { cards: (msg.cards || []).slice(), pattern: pattern };
         state.passes = 0;
         state.lastWinner = msg.by;  // only a PLAY (never a pass) may win the trick
         (msg.cards || []).forEach(function (c) {
@@ -446,6 +471,11 @@ window.PCGameClient = (function () {
             state.played.push({ s: c.s, r: c.r, id: c.id });
           }
         });
+        // Count cards played per seat for the low-card display. My own play
+        // was already counted optimistically in play(); count others here.
+        if (msg.by !== mySid) {
+          state.playedBySeat[msg.by] = (state.playedBySeat[msg.by] || 0) + (msg.cards || []).length;
+        }
         var seat = seatOfSid(msg.by);
         if (msg.by !== mySid) {
           state.hand = state.hand.filter(function (c) {
@@ -454,7 +484,7 @@ window.PCGameClient = (function () {
         }
         var who = state.seats[seat] ? state.seats[seat].nickname : '玩家';
         try { note(who + ' 出 ' + cardsLabel(msg.cards, pattern)); } catch (e) {}
-        if (state.hand.length === 0 && state.finishOrder.indexOf(mySid) === -1) {
+        if (!state.spectator && state.hand.length === 0 && state.finishOrder.indexOf(mySid) === -1) {
           state.finishOrder.push(mySid);
           try { note('你出完了！第 ' + state.finishOrder.length + ' 名'); } catch (e) {}
           try { sendGame({ kind: 'finished', round: state.roundNo, by: mySid, order: state.finishOrder.slice() }); } catch (e) {}
@@ -640,11 +670,16 @@ window.PCGameClient = (function () {
           // Bot finished its cards -> announce so team scoring can resolve.
           // Guard: on rejection rollback() already restored the hand, so do
           // NOT announce a finish for a play that never left the device.
+          // Record it in OUR finishOrder immediately too: the FINISHED echo is
+          // broadcast back to us, and while the merge de-dupes, having it local
+          // up front means the 3rd finisher reliably triggers settlement.
           if (!state.botHands[sid].length) {
             var order = state.finishOrder.slice();
             if (order.indexOf(sid) === -1) order.push(sid);
+            state.finishOrder = order;
             sendDiag({ kind: 'finished', round: state.roundNo, by: sid, order: order },
               'FINISHED by ' + sid + ' order=' + JSON.stringify(order));
+            if (state.finishOrder.length >= 3 && state.phase === 'playing') finishRound();
           }
         }
         // Published. Arm the safety net in case the echo never comes back.
@@ -683,24 +718,112 @@ window.PCGameClient = (function () {
       return (pattern && pattern.name ? pattern.name + ' ' : '') + faces;
     }
 
+    /* Guandan ranks: 大科(1st) 二科(2nd) 二拉(3rd, also 三科) 大拉(4th, last).
+     * A round is only complete once THREE players are out (the fourth is last
+     * by default) or all four have announced. The old code settled at the 2nd
+     * finisher, which froze the remaining bots (phase=finished) and produced an
+     * incomplete result — exactly the log where bot_2/bot_3 never finished. */
+    var RANK_TITLES = ['大科', '二科', '二拉', '大拉'];
+    function seatNick(sid) {
+      var s = state.seats[seatOfSid(sid)];
+      return s ? s.nickname : (isBotSid(sid) ? botNick(sid) : '玩家');
+    }
+    /* Remaining cards for a seat. Everyone can count cards played per seat
+     * (broadcast plays) so remaining = 27 - played. Locally we also know bot
+     * hands exactly (host) and my own hand exactly, which is more accurate. */
+    function remainingOf(sid) {
+      var playedN = state.playedBySeat[sid] || 0;
+      var guess = 27 - Math.min(27, playedN);
+      if (sid === mySid && !state.spectator) return state.hand.length;
+      if (state.botHands && state.botHands[sid]) return state.botHands[sid].length;
+      return guess;
+    }
+    function isTeammate(a, b) {
+      // Team by seat parity: seat0(host)+seat2(partner) vs seat1+seat3.
+      return (seatOfSid(a) % 2) === (seatOfSid(b) % 2);
+    }
+    function finishRound() {
+      if (state.result) return; // already settled this round
+      // Complete the order: append any seat still holding cards, by remaining
+      // card count ascending (fewest cards = better place). Host knows bot
+      // hand sizes; for humans use their visible hand length when available.
+      var order = state.finishOrder.slice();
+      var rest = state.seats.map(function (s) { return s.sid; })
+        .filter(function (sid) { return order.indexOf(sid) === -1; });
+      function left(sid) {
+        if (sid === mySid) return state.hand.length;
+        if (state.botHands && state.botHands[sid]) return state.botHands[sid].length;
+        return 27; // unknown remote human: treat as still holding a full hand
+      }
+      rest.sort(function (a, b) { return left(a) - left(b); });
+      order = order.concat(rest).slice(0, 4);
+      state.finishOrder = order;
+
+      var levelBefore = state.level;
+      var seatIdxOrder = order.map(function (sid) { return seatOfSid(sid); });
+      var delta = window.PCGame.levelDelta(seatIdxOrder, state.seats.map(function (s, i) { return i % 2; }));
+      var firstTeam = seatIdxOrder[0] % 2;
+      var myTeam = state.mySeat % 2;
+      var win = firstTeam === myTeam;
+      // Advance the shared room level by the WINNING team's delta on EVERY
+      // client. (Bumping only when "my team won" made the two teams disagree
+      // on the current level; the next deal carries the host's level but the
+      // settlement display diverged.) 'win' is now display-only.
+      state.level = bumpLevel(state.level, delta);
+
+      state.result = {
+        order: order,
+        ranks: order.map(function (sid, i) {
+          return { sid: sid, nickname: seatNick(sid), title: RANK_TITLES[i] || ('第' + (i + 1)),
+            isMe: sid === mySid, teammate: isTeammate(sid, mySid) };
+        }),
+        win: win, delta: delta, levelBefore: levelBefore, levelAfter: state.level,
+        round: state.roundNo, partnerSid: state.partnerSid
+      };
+      state.phase = 'finished';
+      clearBotTimer();
+      try {
+        note('🏁 第 ' + state.roundNo + ' 局结束 · ' +
+          order.map(function (sid, i) { return RANK_TITLES[i] + ' ' + seatNick(sid); }).join(' / ') +
+          (win ? ' · 本队胜，升 ' + delta + ' 级 → 打' + rankName(state.level) : ' · 对方领先'));
+      } catch (e) {}
+      dlog('MATCH-OVER', 'order=' + JSON.stringify(order) + ' level ' + rankName(levelBefore) +
+        ' -> ' + rankName(state.level) + ' win=' + win + ' round=' + state.roundNo);
+      onUpdate(state);
+    }
+
     function onFinished(msg) {
       dlog('FINISHED-ECHO', 'by=' + msg.by + ' order=' + JSON.stringify(msg.order) +
         ' | prev=' + JSON.stringify(state.finishOrder));
-      state.finishOrder = msg.order.slice();
-      if (state.finishOrder.length >= 2) {
-        dlog('MATCH-OVER', 'order=' + JSON.stringify(state.finishOrder) + ' level ' + rankName(state.level) + ' -> settlement');
-        var team = state.seats.map(function (s, idx) { return idx % 2; });
-        var order = state.finishOrder.map(function (sid) { return seatOfSid(sid); });
-        if (order.length >= 2 && team[order[0]] === team[order[1]]) {
-          var delta = window.PCGame.levelDelta(order, team);
-          state.level = bumpLevel(state.level, delta);
-          note('本队获胜，升 ' + delta + ' 级 → 打' + rankName(state.level));
-        } else {
-          note('对方领先，本局结束');
-        }
-        state.phase = 'finished';
-      }
-      onUpdate(state);
+      // Merge, don't overwrite: echoes may arrive out of order. Keep first-seen
+      // order and never drop a place that is already recorded.
+      var merged = state.finishOrder.slice();
+      (msg.order || [msg.by]).forEach(function (sid) {
+        if (merged.indexOf(sid) === -1) merged.push(sid);
+      });
+      state.finishOrder = merged;
+      if (state.phase !== 'playing') { onUpdate(state); return; }
+      // Only finish when 3 are out (4th is last by default).
+      if (state.finishOrder.length >= 3) finishRound();
+      else onUpdate(state);
+    }
+
+    /* Host confirms the settlement -> bump to the next round and redeal with
+     * the same four seats + partner. Everyone receives the new 'deal' frame
+     * (carrying round + level), so no separate message type is needed. */
+    function nextRound() {
+      if (state.phase !== 'finished') { toast('本局尚未结束'); return false; }
+      if (!isHost()) { toast('只有房主可以开始下一局'); return false; }
+      state.roundNo = (state.roundNo || 0) + 1;
+      state.result = null;
+      state.phase = 'dealing';
+      state.finishOrder = [];
+      state.seatPlays = {};
+      state.played = [];
+      dlog('NEXT-ROUND', 'round=' + state.roundNo + ' level=' + rankName(state.level) +
+        ' players=' + JSON.stringify(state.players) + ' partner=' + state.partnerSid);
+      startMatch();
+      return true;
     }
 
     function bumpLevel(cur, delta) {
@@ -720,7 +843,7 @@ window.PCGameClient = (function () {
         case 'pass': onPass(msg); break;
         case 'finished': onFinished(msg); break;
         case 'start':
-          if (msg.players && !setPlayers(msg.players)) { toast('所选玩家已离线，请重新选择'); break; }
+          if (msg.players && !setPlayers(msg.players, msg.partnerSid)) { toast('所选玩家已离线，请重新选择'); break; }
           if (isHost()) startMatch();
           break;
         case 'spectate_state': applySpectateState(msg); break;
@@ -781,7 +904,9 @@ window.PCGameClient = (function () {
       note('房主已洗牌发牌');
     }
 
-    function requestStart(players) { sendGame({ kind: 'start', players: players || null }); }
+    function requestStart(players, partnerSid) {
+      sendGame({ kind: 'start', players: players || null, partnerSid: partnerSid || null });
+    }
     function requestDeal() { sendGame({ kind: 'deal_request', requestBy: mySid }); }
 
     /* Auto-arrange my hand using the Guandan grouping strategy (bombs first,
@@ -807,6 +932,7 @@ window.PCGameClient = (function () {
     self.syncSeats = syncSeats;
     self.setPlayers = setPlayers;
     self.startMatch = startMatch;
+    self.nextRound = nextRound;
     self.requestStart = requestStart;
     self.requestDeal = requestDeal;
     self.autoArrange = autoArrange;
@@ -827,6 +953,7 @@ window.PCGameClient = (function () {
     };
     self.rankName = rankName;
     self.cardsLabel = cardsLabel;
+    self.remainingOf = remainingOf;
     self.diagText = diagText;         // export bot behaviour trace for the UI
     self.noteDiag = function (text) { dlog('EXTERNAL', text); }; // app-layer errors (e.g. E_REPLAY) feed the trace
     /* A WSS reconnect assigns a fresh sid. Keep the match alive by translating
@@ -840,11 +967,18 @@ window.PCGameClient = (function () {
       function repl(v) { return v === old ? newSid : v; }
       mySid = newSid;
       state.hostSid = repl(state.hostSid);
+      state.partnerSid = repl(state.partnerSid);
       if (state.players) state.players = state.players.map(repl);
       if (state.seats) state.seats.forEach(function (s) { if (s.sid === old) { s.sid = newSid; s.isMe = true; } else s.isMe = false; });
       state.turn = repl(state.turn);
       state.lastWinner = repl(state.lastWinner);
       if (state.finishOrder) state.finishOrder = state.finishOrder.map(repl);
+      if (state.seatPlays && state.seatPlays[old]) { state.seatPlays[newSid] = state.seatPlays[old]; delete state.seatPlays[old]; }
+      if (state.result) {
+        state.result.order = state.result.order.map(repl);
+        state.result.partnerSid = repl(state.result.partnerSid);
+        (state.result.ranks || []).forEach(function (r) { r.sid = repl(r.sid); r.isMe = r.sid === newSid; });
+      }
       if (state._passEchoSig) state._passEchoSig = state._passEchoSig.replace(old, newSid);
       state.mySeat = seatOfSid(newSid);
       dlog('SID-MIGRATE', old + ' -> ' + newSid + ' host=' + state.hostSid + ' turn=' + state.turn + ' phase=' + state.phase);

@@ -68,8 +68,9 @@
     <div class="game-actions">
       <button class="tool-btn" id="btn-game-arrange" title="按掼蛋理牌习惯重新归类手牌">🀄 自动理牌</button>
       <button class="tool-btn" id="btn-game-spread" title="切换堆叠/平铺显示">↔ 平铺</button>
+      <button class="tool-btn" id="btn-game-marquee" title="拖拽框选多张牌（再点一次关闭）">▧ 框选</button>
       <button class="tool-btn" id="btn-game-diag" title="查看机器人完整行为日志（排查不出牌）">🐞 诊断</button>
-      <span style="font-size:11px;color:var(--muted)">同类牌纵向叠放·点单张牌选中·点下方「出牌」 · 牌局全程端到端加密</span>
+      <span style="font-size:11px;color:var(--muted)">同类牌纵向叠放·点单张/下方「全选」选牌·或框选 · 出牌 · 全程端到端加密</span>
     </div>
     <div class="game-log" id="game-log"></div>
     <div class="game-bottom">
@@ -90,11 +91,24 @@
   </div>
   <div id="game-setup-mask" class="hidden"></div>
   <div id="game-setup" class="hidden">
-    <div class="setup-title">选择另外 3 名玩家（已按人数规则预选，点击可调整）</div>
+    <div class="setup-title">第 1 步 · 选择另外 3 名玩家（已按人数规则预选，点击可调整）</div>
     <div id="player-picks"></div>
+    <div class="setup-title" style="margin-top:6px">第 2 步 · 指定你的对家（队友，坐你对面）。不选则默认第 2 位。</div>
+    <div id="partner-picks"></div>
     <div class="setup-foot">
       <button class="tool-btn" id="btn-game-start">开局（0/3）</button>
       <button class="tool-btn" id="btn-setup-close">取消</button>
+    </div>
+  </div>
+
+  <div id="game-settle-mask" class="hidden"></div>
+  <div id="game-settle" class="hidden">
+    <div class="settle-title" id="settle-title">🏁 本局结算</div>
+    <div class="settle-sub" id="settle-sub"></div>
+    <div id="settle-ranks"></div>
+    <div class="setup-foot">
+      <button class="tool-btn" id="btn-settle-next">确认 · 开始下一局</button>
+      <button class="tool-btn" id="btn-settle-close">关闭</button>
     </div>
   </div>
 </div>

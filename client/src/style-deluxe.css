@@ -221,6 +221,14 @@ BASE_STYLES_PLACEHOLDER
   .game-actions .tool-btn,.game-bottom .tool-btn{min-height:44px;font-size:13px}
   .game-bottom{gap:8px;padding-top:6px}
   .game-bottom .tool-btn{min-width:0;flex:1 1 0}
+  /* Settlement modal fits a narrow phone; seats keep the distinct play row. */
+  #game-settle{min-width:0;width:92vw;padding:14px;max-height:86vh;overflow:auto}
+  .settle-title{font-size:16px}
+  .settle-row{padding:7px 9px;font-size:12.5px}
+  .seat .seat-play{gap:1px}
+  .seat .seat-play .sp-card{font-size:8px;padding:1px 2px}
+  /* Allow the hand row extra bottom room for stack 全选 buttons. */
+  .my-hand{padding-bottom:26px}
 }
 
 /* ---------- Landscape phone adaptation (wide but SHORT viewport) ----------
@@ -312,7 +320,61 @@ BASE_STYLES_PLACEHOLDER
 
   /* Modals must fit the short height. */
   #game-setup,.spectate-picker{padding:12px;gap:8px;max-height:92vh;overflow:auto}
+  #game-settle{padding:10px 12px;gap:6px;max-height:94vh;overflow:auto}
+  .settle-row{padding:5px 9px;font-size:12px}
+  .settle-title{font-size:15px}
+  .settle-sub{font-size:11px}
+  .seat .seat-play{margin-top:2px;min-height:10px}
+  .pcard-stack .stack-all{bottom:-14px;font-size:8px;padding:0 3px}
+  .my-hand{padding-bottom:18px}
 }
+
+/* ---- Settlement (four ranks + next round) ---- */
+#game-settle-mask{position:fixed;inset:0;z-index:94;background:rgba(4,7,16,.66);backdrop-filter:blur(2px)}
+#game-settle{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:96;
+  display:flex;flex-direction:column;gap:10px;min-width:320px;max-width:92vw;padding:20px;
+  background:linear-gradient(160deg,#1b2440,#141a30);border:1px solid var(--brand2);
+  border-radius:16px;box-shadow:var(--shadow)}
+#game-settle-mask.hidden,#game-settle.hidden{display:none}
+.settle-title{font-size:18px;font-weight:800;color:#c9bdff;text-align:center}
+.settle-sub{font-size:12.5px;color:var(--muted);text-align:center;line-height:1.5}
+#settle-ranks{display:flex;flex-direction:column;gap:6px;margin:4px 0}
+.settle-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);
+  border-radius:10px;background:rgba(20,27,46,.85);font-size:14px}
+.settle-row .badge-rank{min-width:44px;font-weight:800;color:#c9bdff}
+.settle-row.me{border-color:var(--brand);box-shadow:0 0 0 2px rgba(91,140,255,.16)}
+.settle-row .who{flex:1}
+.settle-row .tag{font-size:11px;color:var(--muted)}
+.settle-row .tag.mate{color:var(--ok)}
+#btn-settle-next{background:var(--brand);color:#fff;border-color:var(--brand);font-weight:700}
+#partner-picks{display:flex;flex-wrap:wrap;gap:6px;min-height:30px}
+.partner-chip{border:1px solid var(--line);background:rgba(20,27,46,.9);color:var(--ink);
+  border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer}
+.partner-chip:hover{border-color:var(--brand2)}
+.partner-chip.on{border-color:#ffcf7a;color:#ffcf7a;background:rgba(255,207,122,.12)}
+
+/* ---- Per-seat played cards (distinct position for each player) ---- */
+.seat{position:relative}
+.seat .cnt.low{color:#ffcf7a;font-weight:800}
+.seat .cnt.out{color:var(--ok);font-weight:700}
+.seat .seat-play{display:flex;flex-wrap:wrap;gap:2px;justify-content:center;margin-top:5px;
+  min-height:14px;font-size:10px;color:var(--muted);line-height:1.2}
+.seat .seat-play .sp-card{background:rgba(243,246,255,.92);color:#121a30;border-radius:3px;
+  padding:1px 3px;font-size:9px;font-weight:700;border:1px solid #c9d4ee;white-space:nowrap}
+.seat .seat-play .sp-card.red{color:#d9455f}
+.seat .seat-play .sp-pass{color:#8a94ad;font-style:italic}
+.seat .seat-play .sp-label{color:#c9bdff;font-weight:700;margin-right:2px}
+
+/* ---- Select-all button under a same-rank stack ---- */
+.pcard-stack .stack-all{position:absolute;left:0;bottom:-17px;z-index:96;
+  border:1px solid var(--brand2);background:rgba(20,27,46,.95);color:#c9bdff;
+  border-radius:6px;padding:1px 5px;font-size:9px;cursor:pointer;white-space:nowrap}
+.pcard-stack .stack-all:hover{border-color:var(--brand);color:#fff}
+.my-hand{padding-bottom:24px}
+/* Marquee (drag box-select) overlay inside the hand row. */
+.hand-marquee{position:absolute;border:1px dashed var(--brand);
+  background:rgba(91,140,255,.14);pointer-events:none;z-index:200;border-radius:4px}
+.my-hand.marquee-on{touch-action:none}
 
 /* ---- Bot behaviour diagnostics panel ---- */
 #diag-panel{position:fixed;inset:5% 6%;z-index:12000;display:flex;flex-direction:column;

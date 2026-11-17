@@ -13,6 +13,21 @@
   var net = null, media = null, countdown = null, game = null;
   var entering = false;
   var chatReady = false;   // true once game/media/UI are initialised (survives WSS reconnect)
+  /* SEQ SEND QUEUE — the bot emits PLAY and FINISHED inside the SAME tick on its
+   * last card (see gameclient.botStep). Both called sendKind() concurrently;
+   * both read the same `state.seq + 1` before either committed, so the server
+   * saw two frames with the SAME seq and rejected one with E_REPLAY — exactly
+   * the "⚠ 消息时序错乱(REPLAY)" in the log at 22:12:03/22:12:09, which dropped
+   * a bot's FINISHED and left the round stuck. Serialising through a promise
+   * chain makes seq allocation strictly one-at-a-time; the next send only
+   * starts after the previous frame is handed to the socket (seq committed).
+   */
+  var sendQueue = Promise.resolve();
+  function enqueueSend(task) {
+    var run = sendQueue.then(task, task);
+    sendQueue = run.catch(function () {}); // keep the chain alive after a rejected send
+    return run;
+  }
 
   /* Deluxe keeps the session across F5: UK lives in IndexedDB, nickname here. */
   function nickKey() { return 'pc_nick_' + state.config.roomId; }
@@ -327,7 +342,11 @@
     catch (e) { toast('发送失败：' + e.message); }
   }
 
-  async function sendKind(plaintext, kind) {
+  function sendKind(plaintext, kind) {
+    return enqueueSend(function () { return sendKindNow(plaintext, kind); });
+  }
+
+  async function sendKindNow(plaintext, kind) {
     /* ROOT-CAUSE FIX (bot "not playing" freeze):
      * seq was incremented optimistically BEFORE send, but net.send() silently
      * returns false when the WebSocket is not OPEN (reconnecting). One message
