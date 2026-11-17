@@ -181,26 +181,83 @@
     return out;
   }
 
-  /* All legal candidate plays from a hand: the arranged groups (kept intact)
-   * plus low singles/pairs/triples so the bot can answer any trick type. */
+  /* All legal candidate plays from a hand.
+   *
+   * IMPORTANT: answering must consider EVERY legal combination the hand can
+   * form, not just the groups chosen by arrange(). arrange() optimises for
+   * "fewest tricks" and happily folds a would-be straight into a triple-pair
+   * or double-straight. If we only expose those groups + singles/pairs/triples,
+   * the bot cannot see the straight it actually holds and passes even though it
+   * could beat a straight on the table — the "不跟牌也不过牌" symptom. So here we
+   * also enumerate straights, double/triple straights and straight flushes from
+   * the ORIGINAL hand. mk() still validates every combo via classify(), so no
+   * illegal play can slip through. */
   function candidates(hand, level, G) {
     var arranged = arrange(hand, level, G);
     var out = arranged.groups.slice();
     var seen = {};
-    out.forEach(function (g) { seen[g.cards.map(function (c) { return c.id; }).sort().join(',')] = true; });
+    function key(cs) { return cs.map(function (c) { return c.id; }).sort().join(','); }
+    out.forEach(function (g) { seen[key(g.cards)] = true; });
     function maybe(cs) {
       if (!cs.length) return;
-      var k = cs.map(function (c) { return c.id; }).sort().join(',');
+      var k = key(cs);
       if (seen[k]) return;
       var g = mk(cs, G, level);
       if (g) { seen[k] = true; out.push(g); }
     }
     var cnt = rankCounts(hand);
-    Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-      var one = pickRank(hand, r, 1);
-      maybe(one);                       // lowest single of this rank
-      if (cnt[r] >= 2) maybe(pickRank(hand, r, 2));
-      if (cnt[r] >= 3) maybe(pickRank(hand, r, 3));
+    var ranks = Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; });
+    ranks.forEach(function (r) {
+      maybe(pickRank(hand, r, 1));                       // single
+      if (cnt[r] >= 2) maybe(pickRank(hand, r, 2));      // pair
+      if (cnt[r] >= 3) maybe(pickRank(hand, r, 3));      // triple
+      if (cnt[r] >= 4) maybe(pickRank(hand, r, 4));      // bomb
+    });
+    // Jokers: rocket / partial joker pairs.
+    var jokers = hand.filter(function (c) { return c.s === 'W'; });
+    if (jokers.length >= 4) maybe(jokers.slice(0, 4));
+    if (jokers.length >= 2) maybe(jokers.slice(0, 2));
+    // Straight (5+ consecutive ranks, one card each, 3..A).
+    function eachRun(rankList, perRank, fn) {
+      for (var len = rankList.length; len >= 2; len--) {
+        for (var i = 0; i + len <= rankList.length; i++) {
+          var run = rankList.slice(i, i + len);
+          var ok = run[run.length - 1] <= 14;
+          for (var k = 1; ok && k < run.length; k++) if (run[k] !== run[k - 1] + 1) ok = false;
+          if (ok) fn(run);
+        }
+      }
+    }
+    eachRun(ranks, 1, function (run) {
+      var cs = [];
+      run.forEach(function (r) { var c = pickRank(hand, r, 1)[0]; if (c) cs.push(c); });
+      maybe(cs);
+    });
+    // Double straights: 3+ consecutive ranks, two of each.
+    var pairRanks = ranks.filter(function (r) { return cnt[r] >= 2 && r <= 14; });
+    eachRun(pairRanks, 2, function (run) {
+      if (run.length < 3) return;
+      var cs = [];
+      run.forEach(function (r) { cs = cs.concat(pickRank(hand, r, 2)); });
+      maybe(cs);
+    });
+    // Triple straights (钢板): 2+ consecutive ranks, three of each.
+    var tripRanks = ranks.filter(function (r) { return cnt[r] >= 3 && r <= 14; });
+    eachRun(tripRanks, 3, function (run) {
+      var cs = [];
+      run.forEach(function (r) { cs = cs.concat(pickRank(hand, r, 3)); });
+      maybe(cs);
+    });
+    // Straight flushes: same suit, 5+ consecutive ranks.
+    ['S', 'H', 'C', 'D'].forEach(function (suit) {
+      var sc = hand.filter(function (c) { return c.s === suit && c.r >= 3 && c.r <= 14; });
+      var sranks = unique(sc.map(function (c) { return c.r; })).sort(function (a, b) { return a - b; });
+      eachRun(sranks, 1, function (run) {
+        if (run.length < 5) return;
+        var cs = [];
+        run.forEach(function (r) { var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c); });
+        maybe(cs);
+      });
     });
     return out;
   }
