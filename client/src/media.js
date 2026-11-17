@@ -62,12 +62,14 @@ window.PCMedia = function (ctx) {
     }
     if (self._recording) {
       self._recording = false;
+      if (ctx.onRecordState) ctx.onRecordState(false);
       if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
       ctx.toast('录音结束，正在加密发送…');
       return;
     }
     if (self._pending) return;
     self._pending = true;
+    if (ctx.onRecordState) ctx.onRecordState('pending');
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
       self._pending = false;
       if (self._recording) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
@@ -77,6 +79,7 @@ window.PCMedia = function (ctx) {
       mediaRecorder.onstop = function () {
         stream.getTracks().forEach(function (t) { t.stop(); });
         self._recording = false;
+        if (ctx.onRecordState) ctx.onRecordState(false);
         if (!chunks.length) return;
         var blob = new Blob(chunks, { type: 'audio/webm' });
         blob.arrayBuffer().then(function (buf) {
@@ -87,9 +90,11 @@ window.PCMedia = function (ctx) {
       };
       mediaRecorder.start();
       self._recording = true;
+      if (ctx.onRecordState) ctx.onRecordState(true);
       ctx.toast('录音中… 再次点击麦克风按钮结束');
     }).catch(function () {
       self._pending = false;
+      if (ctx.onRecordState) ctx.onRecordState(false);
       ctx.toast('无法访问麦克风，请使用在线 HTTPS 入口');
     });
   };

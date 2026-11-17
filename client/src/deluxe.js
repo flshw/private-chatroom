@@ -155,6 +155,10 @@ window.PCDeluxe = (function () {
    * tapping the specific cards you want, not a whole-group toggle.
    * `spread` flattens every card in a single row. Observers get a read-only hand. */
   function renderHand(hand, shown, st) {
+    // Rebuilding innerHTML resets scrollLeft to 0. On a phone the fan is
+    // wider than the screen, so selecting a card near the end would snap the
+    // hand back to the start. Preserve the scroll offset across re-renders.
+    var prevScroll = hand.scrollLeft;
     hand.innerHTML = '';
     if (!shown.length) return;
     var readonly = !!st.spectator;
@@ -184,9 +188,16 @@ window.PCDeluxe = (function () {
       // top-left rank+suit pip, so a player can read and tap a single card.
       var stack = document.createElement('div');
       stack.className = 'pcard-stack';
+      // Footprint must match the CURRENT card size. On phones the cards shrink
+      // (36x52) and step by 8/18 via CSS; using desktop numbers here left big
+      // gaps and needless horizontal overflow. Read the rendered card metrics.
+      var cardW = 44, cardH = 62, stepX = 10, stepY = 22;
+      if (window.matchMedia && window.matchMedia('(max-width:720px)').matches) {
+        cardW = 36; cardH = 52; stepX = 8; stepY = 18;
+      }
       // Reserve the fanned footprint so cards don't overflow the hand row.
-      stack.style.width = (44 + 10 * (g.cards.length - 1)) + 'px';
-      stack.style.height = (62 + 22 * (g.cards.length - 1)) + 'px';
+      stack.style.width = (cardW + stepX * (g.cards.length - 1)) + 'px';
+      stack.style.height = (cardH + stepY * (g.cards.length - 1)) + 'px';
       // z-index rises with row so lower cards' pips are not covered.
       g.cards.forEach(function (c, i) {
         var el = cardEl(c, !readonly && !!selected[c.id], toggleOne(c));
@@ -197,6 +208,9 @@ window.PCDeluxe = (function () {
       stack.title = (RANK_LABEL[g.rank] || g.rank) + ' × ' + g.cards.length + '（点单张牌可选/取消）';
       hand.appendChild(stack);
     });
+    // Restore the horizontal scroll offset captured above so tapping a card
+    // does not yank the fan back to its beginning.
+    if (prevScroll) hand.scrollLeft = prevScroll;
   }
 
   /* Two decks: each ordinary rank appears eight times, each joker twice.
@@ -443,23 +457,36 @@ window.PCDeluxe = (function () {
     }
   }
 
-  /* --- PiP video drag --- */
+  /* PiP video drag. Uses Pointer Events so the SAME handler works for mouse,
+   * pen and touch — a mouse-only implementation left the small window
+   * completely undraggable on phones, where it covered the play/pass row. */
   function initPiPDrag() {
     var box = $('pip-video'), head = $('pip-head');
     if (!box || !head) return;
     var dragging = false, ox = 0, oy = 0;
-    head.addEventListener('mousedown', function (e) {
+    function down(e) {
+      // Let the close button work; never start a drag from it.
+      if (e.target && (e.target.id === 'btn-pip-close' || e.target.tagName === 'BUTTON')) return;
       dragging = true;
       var r = box.getBoundingClientRect();
       ox = e.clientX - r.left; oy = e.clientY - r.top;
-      box.style.right = 'auto'; box.style.bottom = 'auto';
-    });
-    window.addEventListener('mousemove', function (e) {
+      box.style.right = 'auto'; box.style.bottom = 'auto'; box.style.top = r.top + 'px';
+      if (head.setPointerCapture) { try { head.setPointerCapture(e.pointerId); } catch (_) {} }
+      e.preventDefault();
+    }
+    function move(e) {
       if (!dragging) return;
-      box.style.left = Math.max(0, Math.min(window.innerWidth - box.offsetWidth, e.clientX - ox)) + 'px';
-      box.style.top = Math.max(0, Math.min(window.innerHeight - 60, e.clientY - oy)) + 'px';
-    });
-    window.addEventListener('mouseup', function () { dragging = false; });
+      var maxX = Math.max(0, window.innerWidth - box.offsetWidth);
+      var maxY = Math.max(0, window.innerHeight - 56);
+      box.style.left = Math.max(0, Math.min(maxX, e.clientX - ox)) + 'px';
+      box.style.top = Math.max(0, Math.min(maxY, e.clientY - oy)) + 'px';
+      e.preventDefault();
+    }
+    function up() { dragging = false; }
+    head.addEventListener('pointerdown', down);
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   }
 
   /* Video streams: mirror app.js overlay into the PiP body instead of fullscreen. */

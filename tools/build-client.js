@@ -112,7 +112,9 @@ const deluxeMarkers = baseMarkers.concat([
   ['底部出牌按钮', 'class="game-bottom"'],
   ['出牌统计', 'state.played.push('],
   ['手牌同类堆叠', "className = 'pcard-stack'"],
-  ['纵向扇形堆叠', '22 * (g.cards.length - 1)'],
+  ['纵向扇形堆叠', 'stepY * (g.cards.length - 1))'],
+  ['移动端堆叠尺寸自适应', "cardW = 36; cardH = 52; stepX = 8; stepY = 18"],
+  ['选牌保持滚动位置', 'if (prevScroll) hand.scrollLeft = prevScroll'],
   ['单张可选', 'function toggleOne(c)'],
   ['牌面角标花色', "corner.className = 'pip'"],
   ['出牌区居中', '.game-table{width:min(100%,560px)'],
@@ -149,7 +151,15 @@ const deluxeMarkers = baseMarkers.concat([
   ['机器人补位座位', "BOT_SIDS = ['bot_1', 'bot_2', 'bot_3']"],
   ['游戏客户端', 'window.PCGameClient = (function'],
   ['3D 引擎', 'window.PC3D = (function'],
-  ['豪华版UI', 'window.PCDeluxe = (function']
+  ['豪华版UI', 'window.PCDeluxe = (function'],
+  /* Mobile / touch adaptation — keep these fixes from regressing on rebuild. */
+  ['移动顶栏两行布局', 'grid-template-areas:"name meta . exit" "game voice mem ."'],
+  ['移动手牌可滚到首尾', 'justify-content:safe center'],
+  ['移动按钮44px触控', '.game-actions .tool-btn,.game-bottom .tool-btn{min-height:44px'],
+  ['PiP触摸拖拽', 'head.addEventListener(\'pointerdown\', down)'],
+  ['录音状态反馈', 'b.classList.toggle(\'recording\', state === true)'],
+  ['触摸无粘滞悬停', '@media(hover:hover)'],
+  ['输入字号防iOS缩放', '.composer input[type=text]{min-width:88px;padding:10px 11px;font-size:16px}']
 ]);
 build('豪华版', deluxeParts, deluxeMarkers, 'client/dist/private-chat-deluxe.template.html');
 

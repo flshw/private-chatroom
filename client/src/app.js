@@ -311,7 +311,16 @@
       sendKind: sendKind,
       onRemoteTrack: onRemoteTrack,
       onLocalStream: onLocalStream,
-      onCallEnd: onCallEnd
+      onCallEnd: onCallEnd,
+      /* Mic button gives immediate, unmistakable feedback: pending (dimmed),
+       * recording (red pulse + label), or idle. Previously a tap looked dead. */
+      onRecordState: function (state) {
+        var b = $('btn-voice'); if (!b) return;
+        b.classList.toggle('recording', state === true);
+        b.classList.toggle('rec-pending', state === 'pending');
+        b.textContent = state === true ? '⏹' : '🎤';
+        b.title = state === true ? '点击结束录音并加密发送' : '录制语音条（端到端加密）';
+      }
     });
     // Deluxe edition: initialise Guandan engine + UI. Simple edition is a no-op.
     if (window.PCGameClient && window.PCDeluxe && window.PCDeluxe.bind) {

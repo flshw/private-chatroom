@@ -120,7 +120,12 @@ BASE_STYLES_PLACEHOLDER
 .pcard-stack{position:relative;flex:0 0 auto;cursor:pointer}
 .pcard-stack>.pcard{position:absolute;left:calc(10px * var(--i, 0));top:calc(22px * var(--i, 0));
   box-shadow:0 2px 6px rgba(0,0,0,.35);transition:transform .1s,box-shadow .1s}
-.pcard-stack>.pcard:hover{transform:translateY(-9px);z-index:90!important}
+/* Hover-lift only on real pointer devices — on touch screens :hover sticks
+ * after a tap and leaves a card permanently raised, confusing selection. */
+@media(hover:hover){
+  .pcard-stack>.pcard:hover{transform:translateY(-9px);z-index:90!important}
+}
+
 .game-actions{display:flex;gap:8px;justify-content:center;padding-bottom:4px;flex-wrap:wrap}
 /* Text hint / play log floats at the LEFT-CENTRE as a compact card. */
 .game-log{position:absolute;left:16px;top:50%;transform:translateY(-50%);z-index:6;
@@ -143,13 +148,77 @@ BASE_STYLES_PLACEHOLDER
 .spectate-picker .pk-title{font-size:13px;color:var(--muted);margin-bottom:4px}
 .spectate-picker .pk-cancel{margin-top:4px;color:var(--muted)}
 
+/* ---------- Mobile / touch adaptation (deluxe only, <=720px) ---------- */
 @media(max-width:720px){
-  #pip-video{width:180px;right:10px;bottom:72px}
-  .game-seats{grid-template-columns:repeat(2,1fr)}
+  /* Top bar: two-row grid. A single flex row used to total 462px on a 390px
+   * screen — the exit button was pushed off-screen and the room name wrapped
+   * into a vertical stack of Chinese characters. Row 1 = name/status/exit,
+   * row 2 = the three action buttons. */
+  .topbar{display:grid!important;grid-template-columns:auto auto 1fr auto;
+    grid-template-areas:"name meta . exit" "game voice mem .";
+    gap:8px;padding:9px 12px}
+  .topbar .room-name{grid-area:name;min-width:0;max-width:calc(100vw - 220px);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
+  .topbar .room-name .deluxe-badge{display:none}
+  .topbar .top-meta{grid-area:meta;margin-left:0;font-size:11px;white-space:nowrap}
+  #btn-exit{grid-area:exit}
+  #btn-game{grid-area:game}
+  #btn-voice-live{grid-area:voice}
+  #btn-members{grid-area:mem}
+  .topbar .tool-btn,.topbar .icon{min-height:40px}
+  /* Member drawer inherits the taller two-row toolbar. */
+  .members{top:104px!important;bottom:74px!important;width:84%!important}
+
+  /* Chat: tighter message padding + compact toolbar icons so the input keeps
+   * a usable width (it collapsed to 68px on a 360px screen before). */
+  .messages{padding:12px}
+  .composer{gap:6px;padding:9px 10px}
+  .composer .icon{padding:8px 7px;font-size:12px;min-width:32px;min-height:40px}
+  .composer input[type=text]{min-width:88px;padding:10px 11px;font-size:16px}
+  #btn-send{min-width:60px;padding:10px 12px}
+
+  /* PiP: shrink and park at top-right so it never covers the pass/play row.
+   * touch-action:none on the grab handle lets pointer events drag it. */
+  #pip-video{width:150px;right:8px;bottom:auto;top:110px}
+  #pip-head{touch-action:none}
+
+  /* Game HUD follows the taller toolbar; leave room for the composer. On a
+   * small screen the translucent HUD lets chat text bleed through and collide
+   * with seats/cards, so use a near-opaque backdrop here (chat stays one tap
+   * away via the 掼蛋 button to close the panel). */
+  #game-panel{inset:104px 0 74px 0;padding:8px 10px;
+    background:linear-gradient(180deg,rgba(9,14,28,.99),rgba(9,14,28,.985) 55%,rgba(9,14,28,.99))}
+
+  /* Card counter: one horizontally-scrollable row instead of three wrapped
+   * rows that ate 111px of a short phone screen. */
+  #card-counter{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;
+    padding:6px 8px;margin-bottom:6px;gap:4px}
+  #card-counter .cc-title{font-size:11px;position:sticky;left:0;
+    background:rgba(10,14,28,.96);z-index:1;padding-right:4px}
+  .cc-rank{font-size:11px;min-width:32px;padding:3px 5px;flex:0 0 auto}
+
+  .game-seats{grid-template-columns:repeat(2,1fr);gap:5px;margin-bottom:6px}
+  .seat{padding:6px 4px;font-size:11px}
   .pcard{width:36px;height:52px;font-size:14px}
   .pcard-stack>.pcard{left:calc(8px * var(--i, 0));top:calc(18px * var(--i, 0))}
-  .game-table{width:100%;max-height:150px;min-height:70px}
-  .game-log{width:132px;left:6px;font-size:11px;max-height:34vh;padding:8px}
-  #card-counter .cc-title{font-size:12px}
-  .cc-rank{font-size:13px;min-width:38px;padding:4px 6px}
+  .game-table{width:100%;max-height:130px;min-height:66px;padding:8px;gap:4px}
+  .game-table>.pcard{width:34px;height:48px}
+
+  /* Play log: no room to float on a narrow screen. Flow it as a compact bar
+   * above the hand instead of covering the played cards / chat. */
+  .game-log{position:static;transform:none;width:100%;max-height:76px;overflow:auto;
+    left:auto;top:auto;margin:6px 0;padding:7px 10px;font-size:11.5px;line-height:1.5;flex:0 0 auto}
+  .game-log:before{display:inline-block;margin:0 6px 0 0;padding:0;border:0;font-size:11px}
+
+  /* Hand: `safe center` keeps the fan centred when it fits but falls back to
+   * flex-start when it overflows, so the first/last cards stay reachable by
+   * scrolling (plain `center` clips the leading cards out of scroll range). */
+  .my-hand{justify-content:safe center;gap:7px;padding:22px 8px 8px;max-height:132px;min-height:92px;
+    -webkit-overflow-scrolling:touch}
+  .game-actions{gap:6px}
+  .game-actions>span{display:none}
+  /* 44px minimum touch target for every game control. */
+  .game-actions .tool-btn,.game-bottom .tool-btn{min-height:44px;font-size:13px}
+  .game-bottom{gap:8px;padding-top:6px}
+  .game-bottom .tool-btn{min-width:0;flex:1 1 0}
 }
