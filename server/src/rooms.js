@@ -41,7 +41,7 @@ class Rooms {
     const ttl = rawTtl === undefined || rawTtl === null || rawTtl === ''
       ? P.LIMITS.DEFAULT_TTL_SECONDS : Number(rawTtl);
     if (!Number.isInteger(ttl) || ttl < P.LIMITS.MIN_TTL_SECONDS || ttl > P.LIMITS.MAX_TTL_SECONDS) {
-      throw Object.assign(new Error('生命期须在 60–259200 秒之间'), { status: 400 });
+      throw Object.assign(new Error('生命期须在 60–3600 秒之间（最长 1 小时，到期自动销毁）'), { status: 400 });
     }
     const maxMembers = body.maxMembers === undefined ? P.LIMITS.DEFAULT_MAX_MEMBERS : Number(body.maxMembers);
     if (!Number.isInteger(maxMembers) || maxMembers < 2 || maxMembers > config.hardMaxMembers) {

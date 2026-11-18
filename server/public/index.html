@@ -92,7 +92,7 @@ button:disabled{opacity:.5;cursor:default}
       </div>
     </div>
     <div class="row">
-      <div><label>生命期 <span style="color:var(--muted);font-weight:400">（默认 1 小时，自动记住）</span></label><select id="r-ttl"><option value="3600" selected>1 小时</option><option value="28800">8 小时</option><option value="43200">12 小时</option><option value="86400">24 小时</option><option value="172800">48 小时</option><option value="259200">72 小时</option></select></div>
+      <div><label>生命期 <span style="color:var(--muted);font-weight:400">（固定 1 小时，到期自动销毁，无需清理）</span></label><select id="r-ttl"><option value="3600" selected>1 小时（自动销毁）</option></select></div>
       <div><label>人数上限</label><select id="r-max"><option value="2">2 人</option><option value="4">4 人</option><option value="6" selected>6 人</option><option value="10">10 人</option><option value="20">20 人</option></select></div>
     </div>
     <div><label>客户端版本 <span style="color:var(--muted);font-weight:400">（自动记住上次选择）</span></label>
@@ -151,7 +151,9 @@ button:disabled{opacity:.5;cursor:default}
     // lifetime (default 3600 = 1 hour)
     var ttl=Number(p.ttl);
     var sel=$('r-ttl');
-    if(ttl&&[3600,28800,43200,86400,172800,259200].indexOf(ttl)!==-1)sel.value=String(ttl);
+    // v26: lifetime is fixed at 1 hour; ignore any stale longer value from
+    // an older localStorage pref so the room never outlives the 1h cap.
+    sel.value='3600';
   }
   function currentEdition(){
     var radios=document.querySelectorAll('#r-edition input[name=edition]:checked');
