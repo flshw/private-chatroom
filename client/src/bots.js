@@ -304,13 +304,21 @@
         maybe(cs);
       });
     });
-    // Wild (red level card) gap-filling — see addWildCandidates(). Pattern
-    // descriptors are built directly (no classify enumeration) for speed.
-    function addDirect(cs, pattern) {
+    // Wild (red level card) gap-filling — see addWildCandidates().
+    // v27 ROOT-CAUSE FIX: the old code trusted a hand-built descriptor whose
+    // rank was the run's literal top card. But classify() resolves wilds to
+    // the STRONGEST substitution (e.g. 10♠ J♠ Q♠ + two red-level wilds is an
+    // A-high straight flush, NOT Q-high). Every mismatch was an UNDER-estimate,
+    // so the bot passed/played weak while holding a winning hand — exactly
+    // the "机器人有牌不跟/出牌逻辑有问题" symptom. Re-derive the descriptor from
+    // the engine so decisions use the strength every client sees. ~1ms, safe.
+    function addDirect(cs) {
       var k = key(cs);
       if (seen[k]) return;
+      var real = G.classify(cs, level);   // authoritative descriptor
+      if (!real) return;                  // never emit an illegal combination
       seen[k] = true;
-      out.push({ cards: cs.slice(), pattern: pattern });
+      out.push({ cards: cs.slice(), pattern: real });
     }
     addWildCandidates(hand, level, G, addDirect);
     return out;

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>私密聊天 · 豪华版</title>
+<title>私密聊天 · 掼蛋版</title>
 <style>/* Copyright (c) 2026 CJS flshw@126.com — Private Chatroom styles. */
 :root{
   --bg:#0b1020;--panel:#141b2e;--panel2:#1b2440;--line:#2a3352;
@@ -242,11 +242,11 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   .pcard-stack>.pcard:hover{transform:translateY(-9px);z-index:90!important}
 }
 
-/* v24: one single control row — 理牌(循环) / 过牌 / 出牌. */
+/* v27: single control row — 理牌(循环) / 出牌 / 过牌.
+ * Each button is a fixed ~4-Chinese-character width (4.6em), NOT stretched. */
 .game-bottom{display:flex;gap:10px;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
-.game-bottom .tool-btn{min-width:92px;text-align:center;flex:1 1 0}
-/* v25: 理牌 button stays NORMAL width (same as 过牌/出牌) — the short label
- * (↔平铺/▤堆叠/🔥火力/🀄少手) fits without the old flex:1.15 widening. */
+.game-bottom .tool-btn{flex:0 0 4.6em;width:4.6em;min-width:0;max-width:4.6em;
+  text-align:center;padding-left:2px;padding-right:2px;white-space:nowrap;overflow:hidden}
 .game-log{position:absolute;left:16px;top:59%;transform:translateY(-50%);z-index:6;
   width:224px;max-height:40vh;overflow-y:scroll;overflow-x:hidden;color:var(--ink);font-size:12.5px;line-height:1.7;
   border:1px solid var(--line);border-radius:12px;padding:10px 12px;
@@ -325,7 +325,7 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   /* 44px minimum touch target for every game control (arrange/pass/play in
    * the SAME bottom row after v24). */
   .game-bottom{gap:6px;padding-top:6px}
-  .game-bottom .tool-btn{min-height:44px;font-size:13px;min-width:0;flex:1 1 0}
+  .game-bottom .tool-btn{min-height:44px;font-size:13px;flex:0 0 4.6em;width:4.6em;min-width:0;max-width:4.6em}
   /* Settlement modal fits a narrow phone; seats keep the distinct play row. */
   #game-settle{min-width:0;width:92vw;padding:14px;max-height:86vh;overflow:auto}
   .settle-title{font-size:16px}
@@ -411,8 +411,8 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
 
   /* v24: one full-width bottom row — 理牌(循环)/过牌/出牌 side by side. */
   .game-bottom{grid-area:bottom;gap:6px;padding:0;margin:0;border:0;align-items:stretch}
-  .game-bottom .tool-btn{min-height:44px;min-width:0;
-    font-size:12px;padding:6px 8px;flex:1 1 0}
+  .game-bottom .tool-btn{min-height:44px;min-width:0;max-width:4.6em;
+    font-size:12px;padding:6px 2px;flex:0 0 4.6em;width:4.6em}
 
   /* Modals must fit the short height. */
   #game-setup{padding:12px;gap:8px;max-height:92vh;overflow:auto}
@@ -497,14 +497,14 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
 <body>
 <div id="boot" class="screen">
   <div class="card">
-    <div class="brand"><span class="dot"></span>私密聊天 <span class="deluxe-badge">豪华版</span></div>
+    <div class="brand"><span class="dot"></span>私密聊天 <span class="deluxe-badge">掼蛋版</span></div>
     <div class="status" id="boot-status">正在校验房间凭证…</div>
   </div>
 </div>
 
 <div id="gate" class="screen hidden">
   <div class="card">
-    <div class="brand"><span class="dot"></span><span id="gate-room">私密聊天</span> <span class="deluxe-badge">豪华版</span></div>
+    <div class="brand"><span class="dot"></span><span id="gate-room">私密聊天</span> <span class="deluxe-badge">掼蛋版</span></div>
     <div class="meta-line"><span id="gate-remain">—</span> · <span id="gate-count">—</span></div>
     <label for="nickname">你的昵称</label>
     <div class="nick-line">
@@ -520,7 +520,7 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
 <div id="chat" class="hidden">
   <canvas id="scene3d"></canvas>
   <header class="topbar">
-    <div class="room-name"><span class="dot"></span><span id="room-name">私密聊天</span><span class="deluxe-badge">豪华版</span></div>
+    <div class="room-name"><span class="dot"></span><span id="room-name">私密聊天</span><span class="deluxe-badge">掼蛋版</span></div>
     <div class="top-meta"><span id="remain">—</span> · <span id="member-count">—</span><button class="icon" id="btn-game-diag" title="查看机器人行为诊断日志">🐞 诊断</button></div>
     <button class="tool-btn" id="btn-game" disabled>🃏 掼蛋</button>
     <button class="tool-btn" id="btn-voice-live">🎧 全双工语音</button>
@@ -556,8 +556,8 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     <div class="my-hand" id="my-hand"></div>
     <div class="game-bottom">
       <button class="tool-btn" id="btn-game-arrange" title="点击循环：平铺→堆叠→火力→少手">🀄 理牌</button>
-      <button class="tool-btn" id="btn-game-pass">过牌</button>
       <button class="tool-btn" id="btn-game-play">出牌</button>
+      <button class="tool-btn" id="btn-game-pass">过牌</button>
     </div>
   </div>
   <div id="diag-panel" class="hidden">
@@ -676,8 +676,8 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     MAX_FILE_BYTES: 8 * 1024 * 1024,    // 8 MiB ciphertext blob
     MAX_NICKNAME_CHARS: 24,
     MAX_ROOM_NAME_CHARS: 40,
-    DEFAULT_TTL_SECONDS: 3600,          // 1 hour — short-lived by design; rooms self-clean
-    MAX_TTL_SECONDS: 3600,              // 1 hour hard ceiling — no manual cleanup needed
+    DEFAULT_TTL_SECONDS: 3600,          // 1 hour default (users may pick longer)
+    MAX_TTL_SECONDS: 86400,             // 24 hours hard ceiling (user may pick up to 24h)
     MIN_TTL_SECONDS: 60,
     DEFAULT_MAX_MEMBERS: 6,
     HARD_MAX_MEMBERS: 20,
@@ -2347,13 +2347,21 @@ window.PCMedia = function (ctx) {
         maybe(cs);
       });
     });
-    // Wild (red level card) gap-filling — see addWildCandidates(). Pattern
-    // descriptors are built directly (no classify enumeration) for speed.
-    function addDirect(cs, pattern) {
+    // Wild (red level card) gap-filling — see addWildCandidates().
+    // v27 ROOT-CAUSE FIX: the old code trusted a hand-built descriptor whose
+    // rank was the run's literal top card. But classify() resolves wilds to
+    // the STRONGEST substitution (e.g. 10♠ J♠ Q♠ + two red-level wilds is an
+    // A-high straight flush, NOT Q-high). Every mismatch was an UNDER-estimate,
+    // so the bot passed/played weak while holding a winning hand — exactly
+    // the "机器人有牌不跟/出牌逻辑有问题" symptom. Re-derive the descriptor from
+    // the engine so decisions use the strength every client sees. ~1ms, safe.
+    function addDirect(cs) {
       var k = key(cs);
       if (seen[k]) return;
+      var real = G.classify(cs, level);   // authoritative descriptor
+      if (!real) return;                  // never emit an illegal combination
       seen[k] = true;
-      out.push({ cards: cs.slice(), pattern: pattern });
+      out.push({ cards: cs.slice(), pattern: real });
     }
     addWildCandidates(hand, level, G, addDirect);
     return out;

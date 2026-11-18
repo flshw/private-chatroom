@@ -311,8 +311,14 @@ const deluxeMarkers = baseMarkers.concat([
   ['机器人拦牌及时炸', '拦牌·及时炸'],
   ['机器人策略诊断字段', 'move.why'],
   ['组合标签堆叠显示', "'stack-label'"],
-  ['理牌按钮正常宽度', 'game-bottom .tool-btn{min-width:92px;text-align:center;flex:1 1 0}'],
+  ['按钮4字符固定宽度', 'flex:0 0 4.6em;width:4.6em;min-width:0;max-width:4.6em'],
   ['理牌按钮短文案', 'b.textContent = r.label;'],
+  ['底部按钮顺序理牌出牌过牌', html => {
+    var b = html.slice(html.indexOf('class="game-bottom"'));
+    var a = b.indexOf('btn-game-arrange'), p = b.indexOf('btn-game-play'), s = b.indexOf('btn-game-pass');
+    return a > -1 && a < p && p < s;
+  }],
+  ['机器人牌型用引擎权威描述符', 'var real = G.classify(cs, level);   // authoritative descriptor'],
   ['顺子封顶5张', 'var MAX_RUN = 5;'],
   ['三带二不合并', '三带二 is intentionally NOT fused'],
   ['三张先于对子', 'if (cnt[r] >= 3) take(pickRank(pool, r, 3));'],

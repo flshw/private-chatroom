@@ -76,8 +76,8 @@
     MAX_FILE_BYTES: 8 * 1024 * 1024,    // 8 MiB ciphertext blob
     MAX_NICKNAME_CHARS: 24,
     MAX_ROOM_NAME_CHARS: 40,
-    DEFAULT_TTL_SECONDS: 3600,          // 1 hour — short-lived by design; rooms self-clean
-    MAX_TTL_SECONDS: 3600,              // 1 hour hard ceiling — no manual cleanup needed
+    DEFAULT_TTL_SECONDS: 3600,          // 1 hour default (users may pick longer)
+    MAX_TTL_SECONDS: 86400,             // 24 hours hard ceiling (user may pick up to 24h)
     MIN_TTL_SECONDS: 60,
     DEFAULT_MAX_MEMBERS: 6,
     HARD_MAX_MEMBERS: 20,

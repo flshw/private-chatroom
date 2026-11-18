@@ -92,18 +92,18 @@ button:disabled{opacity:.5;cursor:default}
       </div>
     </div>
     <div class="row">
-      <div><label>生命期 <span style="color:var(--muted);font-weight:400">（固定 1 小时，到期自动销毁，无需清理）</span></label><select id="r-ttl"><option value="3600" selected>1 小时（自动销毁）</option></select></div>
+      <div><label>生命期 <span style="color:var(--muted);font-weight:400">（默认 1 小时，到期自动销毁）</span></label><select id="r-ttl"><option value="3600" selected>1 小时</option><option value="7200">2 小时</option><option value="21600">6 小时</option><option value="28800">8 小时</option><option value="43200">12 小时</option><option value="86400">24 小时</option></select></div>
       <div><label>人数上限</label><select id="r-max"><option value="2">2 人</option><option value="4">4 人</option><option value="6" selected>6 人</option><option value="10">10 人</option><option value="20">20 人</option></select></div>
     </div>
     <div><label>客户端版本 <span style="color:var(--muted);font-weight:400">（自动记住上次选择）</span></label>
       <div class="radio-row" id="r-edition">
         <label data-edition="lite"><input type="radio" name="edition" value="lite" checked /><span><span class="rt">简洁版</span><span class="rd">轻量快速 · 文字 / 文件 / 语音包 / 语音通话</span></span></label>
-        <label data-edition="deluxe"><input type="radio" name="edition" value="deluxe" /><span><span class="rt">豪华版</span><span class="rd">3D 牌桌 / 语音通话 / 联机掼蛋</span></span></label>
+        <label data-edition="deluxe"><input type="radio" name="edition" value="deluxe" /><span><span class="rt">掼蛋版</span><span class="rd">3D 牌桌 / 语音通话 / 联机掼蛋</span></span></label>
       </div>
     </div>
     <div style="margin-top:18px"><button class="primary" id="btn-apply" style="width:100%">创建房间并下载专属客户端</button></div>
     <div class="msg" id="apply-msg"></div>
-    <p class="hint">创建后自动通过，立即生成一份专属 HTML。简洁版专注文字/文件/语音包与语音通话；豪华版额外提供 3D 牌桌场景与联机掼蛋。发给朋友双击打开即可进入。房间到期后所有消息自动销毁。</p>
+    <p class="hint">创建后自动通过，立即生成一份专属 HTML。简洁版专注文字/文件/语音包与语音通话；掼蛋版额外提供 3D 牌桌场景与联机掼蛋。发给朋友双击打开即可进入。房间到期后所有消息自动销毁。</p>
     <div class="list" id="room-list"></div>
   </div>
 
@@ -124,7 +124,7 @@ button:disabled{opacity:.5;cursor:default}
         <p class="desc">轻量快速 · 文字 / 文件 / 语音条</p>
       </div>
       <div class="qrcard">
-        <div class="lbl">豪华版</div>
+        <div class="lbl">掼蛋版</div>
         <div id="qr-deluxe"></div>
         <a class="link" id="qr-deluxe-link" href="#" target="_blank" rel="noopener"></a>
         <p class="desc">3D 牌桌 / 语音通话 / 联机掼蛋</p>
@@ -151,9 +151,9 @@ button:disabled{opacity:.5;cursor:default}
     // lifetime (default 3600 = 1 hour)
     var ttl=Number(p.ttl);
     var sel=$('r-ttl');
-    // v26: lifetime is fixed at 1 hour; ignore any stale longer value from
-    // an older localStorage pref so the room never outlives the 1h cap.
-    sel.value='3600';
+    // v27: default 1 hour; user may pick 2/6/8/12/24h. Restore remembered value.
+    var TTL_OK=[3600,7200,21600,28800,43200,86400];
+    if(TTL_OK.indexOf(ttl)!==-1)sel.value=String(ttl); else sel.value='3600';
   }
   function currentEdition(){
     var radios=document.querySelectorAll('#r-edition input[name=edition]:checked');
@@ -215,7 +215,7 @@ button:disabled{opacity:.5;cursor:default}
       var dlWrap=document.createElement('div');dlWrap.className='dlwrap';
       var dl=document.createElement('a');dl.href='/pc/api/rooms/'+r.roomId+'/client?edition=lite';dl.textContent='简洁版';
       dl.title='下载会重新签发并轮换凭证，先前下载的客户端立即失效';
-      var dlx=document.createElement('a');dlx.href='/pc/api/rooms/'+r.roomId+'/client?edition=deluxe';dlx.textContent='豪华版';
+      var dlx=document.createElement('a');dlx.href='/pc/api/rooms/'+r.roomId+'/client?edition=deluxe';dlx.textContent='掼蛋版';
       dlx.title='下载会重新签发并轮换凭证，先前下载的客户端立即失效';
       dlWrap.appendChild(dl);dlWrap.appendChild(dlx);
       var qr=document.createElement('button');qr.className='qr';qr.textContent='二维码';
