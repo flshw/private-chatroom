@@ -3,47 +3,335 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>私密聊天 · 运维总览</title>
+<title>私密聊天 · 管理后台</title>
 <style>
-:root{--bg:#0b1020;--panel:#141b2e;--line:#2a3352;--ink:#e7ecf8;--muted:#93a0bd;--brand:#5b8cff;--danger:#e0556b}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;color:var(--ink);background:var(--bg);padding:24px}
-.wrap{max-width:960px;margin:0 auto}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px;margin:0 0 20px}
-.stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:20px}.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px;min-width:130px}
-.stat .k{color:var(--muted);font-size:12px}.stat .v{font-size:22px;font-weight:700;margin-top:4px}
+:root{--bg:#0b1020;--panel:#141b2e;--panel2:#101729;--line:#2a3352;--ink:#e7ecf8;--muted:#93a0bd;--brand:#5b8cff;--brand2:#7aa2ff;--danger:#e0556b;--ok:#39c58a;--warn:#e6a23c}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;color:var(--ink);background:var(--bg);padding:24px}
+.wrap{max-width:1080px;margin:0 auto}
+h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px;margin:0 0 20px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;margin-bottom:18px}
+.hidden{display:none!important}
+label{display:block;font-size:12px;color:var(--muted);margin:12px 0 5px}
+input{width:100%;max-width:420px;padding:11px 13px;border-radius:9px;border:1px solid var(--line);background:#0e1528;color:var(--ink);outline:none;font-size:14px}
+input:focus{border-color:var(--brand)}
+button{border:none;border-radius:9px;padding:9px 16px;cursor:pointer;font-size:13px;font-weight:600;margin:6px 6px 0 0}
+button:disabled{opacity:.5;cursor:not-allowed}
+.primary{background:var(--brand);color:#fff}.ghost{background:#202a46;color:var(--ink)}
+.danger{background:var(--danger);color:#fff}.ok{background:var(--ok);color:#08150f}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.msg{font-size:13px;min-height:20px;margin:10px 0}.msg.err{color:var(--danger)}.msg.ok{color:var(--ok)}
+.tabs{display:flex;gap:8px;margin-bottom:14px}
+.tab{padding:8px 14px;border-radius:8px;background:#1a2340;color:var(--muted);cursor:pointer;font-size:13px}
+.tab.active{background:var(--brand);color:#fff}
+.stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.stat{flex:1;min-width:150px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.stat .k{color:var(--muted);font-size:12px}.stat .v{font-size:24px;font-weight:700;margin-top:4px}
 table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:600;font-size:12px}tr:last-child td{border-bottom:none}
-button{border:none;border-radius:8px;padding:6px 11px;cursor:pointer;font-size:12px}
-.danger{background:var(--danger);color:#fff}
-input{width:100%;max-width:320px;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:#0e1528;color:var(--ink);outline:none}
-.note{color:var(--muted);font-size:12px;margin-top:16px;line-height:1.7}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{color:var(--muted);font-weight:600;font-size:12px;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+.tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
+.tag-issued,.tag-active{background:rgba(57,197,138,.15);color:var(--ok)}
+.tag-revoked,.tag-destroying{background:rgba(230,162,60,.15);color:var(--warn)}
+.online{color:var(--brand2);font-weight:700}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
+.note{color:var(--muted);font-size:12px;line-height:1.7;margin-top:14px}
+.keybox{width:100%;max-width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;word-break:break-all;background:#0a1020;color:var(--ok);border:1px solid var(--line);border-radius:8px;padding:12px;margin:10px 0}
+.topbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
 </style>
 </head>
 <body>
 <main class="wrap">
-  <h1>私密聊天 · 运维总览</h1>
-  <p class="sub">无审批队列（申请自动通过）。此页只提供运行时指标与强制销毁入口。</p>
-  <div class="stats">
-    <div class="stat"><div class="k">版本</div><div class="v" id="s-ver">—</div></div>
-    <div class="stat"><div class="k">活跃房间</div><div class="v" id="s-rooms">—</div></div>
-    <div class="stat"><div class="k">在线连接</div><div class="v" id="s-clients">—</div></div>
-    <div class="stat"><div class="k">待清理</div><div class="v" id="s-clean">—</div></div>
+  <div class="topbar">
+    <div><h1>私密聊天 · 管理后台</h1><p class="sub">房间总览 / 在线人数 / 强制销毁 · 与聊天用户体系隔离的独立管理员凭证</p></div>
+    <div id="who" class="mono hidden"></div>
   </div>
-  <div style="margin-bottom:14px;display:flex;gap:8px">
-    <input id="admin-token" type="password" placeholder="管理员令牌（PC_ADMIN_TOKEN）" />
-    <button id="btn-refresh" style="background:var(--brand);color:#fff">刷新</button>
-  </div>
-  <div id="msg" style="color:var(--danger);font-size:13px;min-height:18px"></div>
-  <table><thead><tr><th>房间</th><th>状态</th><th>到期</th><th>操作</th></tr></thead><tbody id="rows"></tbody></table>
-  <p class="note">管理员令牌由服务端环境变量 PC_ADMIN_TOKEN 设定，仅本页强制销毁接口使用。强制销毁会级联删除该房全部密文、文件与 RK 私钥，不可恢复。</p>
+
+  <section id="loginCard" class="card">
+    <h2 style="font-size:16px;margin:0 0 6px">管理员登录</h2>
+    <div class="tabs">
+      <div class="tab active" id="tabPw" onclick="switchTab('pw')">口令登录</div>
+      <div class="tab" id="tabKey" onclick="switchTab('key')">密钥登录</div>
+    </div>
+    <div id="panePw">
+      <label>管理员口令</label>
+      <input id="inPw" type="password" placeholder="请输入管理员口令" autocomplete="current-password">
+      <div><button class="primary" id="btnLoginPw" onclick="loginPw()">登录</button></div>
+    </div>
+    <div id="paneKey" class="hidden">
+      <label>登录密钥（pcadm_ 开头）</label>
+      <input id="inKey" type="text" placeholder="粘贴此前下载的管理员登录密钥" autocomplete="off">
+      <div><button class="primary" id="btnLoginKey" onclick="loginKey()">用密钥登录</button></div>
+    </div>
+    <div id="loginMsg" class="msg err"></div>
+  </section>
+
+  <section id="changeCard" class="card hidden">
+    <h2 style="font-size:16px;margin:0 0 6px">首次登录 · 请修改口令</h2>
+    <p class="note" style="margin-top:0">出于安全考虑，首次登录必须修改初始口令，之后才能访问房间数据。</p>
+    <label>当前口令</label><input id="inOldPw" type="password" autocomplete="current-password">
+    <label>新口令（10–128 字符）</label><input id="inNewPw" type="password" autocomplete="new-password">
+    <label>确认新口令</label><input id="inNewPw2" type="password" autocomplete="new-password">
+    <div><button class="primary" onclick="changePw()">确认修改</button><button class="ghost" onclick="doLogout()">退出</button></div>
+    <div id="changeMsg" class="msg err"></div>
+  </section>
+
+  <section id="dash" class="hidden">
+    <div class="stats">
+      <div class="stat"><div class="k">房间总数</div><div class="v" id="s-total">—</div></div>
+      <div class="stat"><div class="k">在线连接</div><div class="v" id="s-online">—</div></div>
+      <div class="stat"><div class="k">活跃房间</div><div class="v" id="s-active">—</div></div>
+      <div class="stat"><div class="k">待清理</div><div class="v" id="s-clean">—</div></div>
+    </div>
+
+    <div class="card">
+      <div class="topbar" style="margin-bottom:12px">
+        <h2 style="font-size:16px;margin:0">聊天室列表 <span id="roomCount" class="mono"></span></h2>
+        <div class="row">
+          <button class="ghost" onclick="loadRooms()">刷新列表</button>
+          <button class="ghost" onclick="showSecurity()">安全设置</button>
+          <button class="ghost" onclick="doLogout()">退出登录</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>房间名称</th><th>房间 ID</th><th>状态</th><th>在线</th><th>成员上限</th><th>剩余时间</th><th>生命期</th><th>操作</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="8" class="mono">加载中…</td></tr></tbody>
+      </table>
+      </div>
+      <div id="dashMsg" class="msg err"></div>
+      <p class="note">强制销毁会级联删除该房全部密文、文件、分享码与房间密钥，不可恢复，请谨慎操作。</p>
+    </div>
+
+    <section id="securityCard" class="card hidden">
+      <h2 style="font-size:16px;margin:0 0 6px">安全设置</h2>
+      <p class="note" style="margin-top:0">下载登录密钥后，可用「密钥登录」免口令进入管理后台。密钥仅显示一次；重新生成会使旧密钥立即失效。</p>
+      <div class="row">
+        <button class="primary" id="btnGenKey" onclick="genKey()">生成并下载登录密钥</button>
+        <button class="danger" id="btnRevokeKey" onclick="revokeKey()">吊销现有密钥</button>
+      </div>
+      <div id="keyBox" class="keybox hidden"></div>
+      <div><button id="btnDownloadKey" class="ok hidden" onclick="downloadKey()">下载密钥文件</button></div>
+      <label>修改口令 · 新口令</label><input id="inNewPw3" type="password" autocomplete="new-password">
+      <label>确认新口令</label><input id="inNewPw4" type="password" autocomplete="new-password">
+      <div><button class="primary" onclick="changePwFromDash()">更新口令</button></div>
+      <div id="secMsg" class="msg err"></div>
+    </section>
+  </section>
 </main>
+
 <script>
 (function(){
-  var $=function(id){return document.getElementById(id)};
-  function health(){return fetch('/pc/api/health').then(function(r){return r.json()})}
-  health().then(function(d){
-    if(!d.ok)return;$('s-ver').textContent=d.pcVersion||'—';$('s-rooms').textContent=d.rooms;$('s-clients').textContent=d.clients;$('s-clean').textContent=d.pendingCleanup;
-  }).catch(function(){});
-  $('btn-refresh').onclick=function(){health().then(function(d){$('s-rooms').textContent=d.rooms;$('s-clients').textContent=d.clients;$('s-clean').textContent=d.pendingCleanup;$('msg').textContent='已刷新'})};
+  var $ = function(id){ return document.getElementById(id); };
+  var currentKey = null;
+  var API = '/pc/api/admin';
+
+  async function api(p, opts){
+    opts = opts || {};
+    opts.headers = Object.assign({}, opts.headers || {});
+    if (opts.body && typeof opts.body !== 'string') {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(opts.body);
+    }
+    opts.credentials = 'same-origin';
+    var r = await fetch(API + p, opts);
+    var b = {}; try { b = await r.json(); } catch(e){}
+    return { status: r.status, body: b };
+  }
+  function post(p, b){ return api(p, { method:'POST', body: b || {} }); }
+  function errMsg(r){ return (r.body && r.body.error) || ('请求失败 (' + r.status + ')'); }
+
+  function switchTab(which){
+    $('tabPw').classList.toggle('active', which === 'pw');
+    $('tabKey').classList.toggle('active', which === 'key');
+    $('panePw').classList.toggle('hidden', which !== 'pw');
+    $('paneKey').classList.toggle('hidden', which !== 'key');
+    $('loginMsg').textContent = '';
+  }
+
+  async function boot(){
+    var r = await api('/status');
+    if (r.status !== 200) { $('loginMsg').textContent = '无法连接管理后台'; return; }
+    if (r.body.authenticated) {
+      if (r.body.mustChange) showChange();
+      else showDash();
+    }
+  }
+
+  async function loginPw(){
+    $('loginMsg').textContent = '';
+    var pw = $('inPw').value;
+    if (!pw) { $('loginMsg').textContent = '请输入口令'; return; }
+    var r = await post('/login', { password: pw });
+    if (r.status !== 200) { $('loginMsg').textContent = errMsg(r); return; }
+    $('inPw').value = '';
+    if (r.body.mustChange) showChange(); else showDash();
+  }
+
+  async function loginKey(){
+    $('loginMsg').textContent = '';
+    var key = $('inKey').value.trim();
+    if (!key) { $('loginMsg').textContent = '请输入登录密钥'; return; }
+    var r = await post('/login-key', { key: key });
+    if (r.status !== 200) { $('loginMsg').textContent = errMsg(r); return; }
+    $('inKey').value = '';
+    if (r.body.mustChange) showChange(); else showDash();
+  }
+
+  function showChange(){
+    $('loginCard').classList.add('hidden');
+    $('dash').classList.add('hidden');
+    $('changeCard').classList.remove('hidden');
+    $('changeMsg').textContent = '';
+    $('inOldPw').focus();
+  }
+
+  async function changePw(){
+    $('changeMsg').textContent = '';
+    var oldPw = $('inOldPw').value, p1 = $('inNewPw').value, p2 = $('inNewPw2').value;
+    if (p1 !== p2) { $('changeMsg').textContent = '两次输入的新口令不一致'; return; }
+    var r = await post('/password', { oldPassword: oldPw, newPassword: p1 });
+    if (r.status !== 200) { $('changeMsg').textContent = errMsg(r); return; }
+    $('inOldPw').value = $('inNewPw').value = $('inNewPw2').value = '';
+    showDash();
+  }
+
+  function showDash(){
+    $('loginCard').classList.add('hidden');
+    $('changeCard').classList.add('hidden');
+    $('dash').classList.remove('hidden');
+    $('who').classList.remove('hidden');
+    $('who').textContent = '管理员已登录';
+    loadRooms();
+  }
+
+  function showSecurity(){
+    var c = $('securityCard');
+    c.classList.toggle('hidden');
+    if (!c.classList.contains('hidden')) c.scrollIntoView({ behavior:'smooth', block:'start' });
+  }
+
+  function remainText(sec){
+    if (sec <= 0) return '已到期';
+    var h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), s = sec%60;
+    return (h ? h + '小时' : '') + (m ? m + '分' : '') + s + '秒';
+  }
+  function ttlText(sec){
+    if (!sec) return '—';
+    var h = Math.round(sec/3600);
+    return h + ' 小时';
+  }
+  function esc(s){ var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+  async function loadRooms(){
+    $('dashMsg').textContent = '';
+    var r = await api('/rooms');
+    if (r.status === 401 || r.status === 403) { $('dash').classList.add('hidden'); $('loginCard').classList.remove('hidden'); $('loginMsg').textContent='登录已过期或需重新验证，请重新登录'; return; }
+    if (r.status !== 200) { $('dashMsg').textContent = errMsg(r); return; }
+    var st = r.body.stats || {};
+    $('s-total').textContent = st.total != null ? st.total : '—';
+    $('s-online').textContent = st.onlineClients != null ? st.onlineClients : '—';
+    $('s-active').textContent = st.activeRooms != null ? st.activeRooms : '—';
+    $('s-clean').textContent = st.pendingCleanup != null ? st.pendingCleanup : '—';
+    var rooms = r.body.rooms || [];
+    $('roomCount').textContent = '(' + rooms.length + ')';
+    var tb = $('rows');
+    if (!rooms.length) { tb.innerHTML = '<tr><td colspan="8" class="mono">当前没有聊天室</td></tr>'; return; }
+    tb.innerHTML = rooms.map(function(rm){
+      var tagCls = rm.status === 'active' ? 'tag-active' : (rm.status === 'issued' ? 'tag-issued' : 'tag-' + rm.status);
+      var statusTxt = rm.status + (rm.revoked ? ' · 已吊销' : '');
+      return '<tr>' +
+        '<td>' + esc(rm.name) + '</td>' +
+        '<td class="mono">' + esc(rm.roomId) + '</td>' +
+        '<td><span class="tag ' + tagCls + '">' + esc(statusTxt) + '</span></td>' +
+        '<td class="online">' + (rm.onlineCount || 0) + '</td>' +
+        '<td>' + (rm.maxMembers || '—') + '</td>' +
+        '<td>' + remainText(rm.remainSeconds || 0) + '</td>' +
+        '<td>' + ttlText(rm.ttlSeconds) + '</td>' +
+        '<td><button class="danger" onclick="destroyRoom(\'' + esc(rm.roomId) + '\',\'' + esc(rm.name).replace(/'/g,"\\'") + '\')">销毁</button></td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  async function destroyRoom(id, name){
+    if (!window.confirm('确定销毁聊天室「' + name + '」吗？\n\n该操作会永久删除全部聊天记录、文件与密钥，不可恢复。')) return;
+    var r = await post('/rooms/' + encodeURIComponent(id) + '/destroy', {});
+    if (r.status !== 200) { $('dashMsg').textContent = errMsg(r); return; }
+    loadRooms();
+  }
+
+  async function genKey(){
+    $('secMsg').className = 'msg err';
+    $('secMsg').textContent = '';
+    if (!window.confirm('生成新密钥会立即使当前密钥失效。确定继续吗？')) return;
+    var r = await post('/key', {});
+    if (r.status !== 200) { $('secMsg').textContent = errMsg(r); return; }
+    currentKey = r.body.key;
+    var box = $('keyBox');
+    box.textContent = currentKey;
+    box.classList.remove('hidden');
+    $('btnDownloadKey').classList.remove('hidden');
+    $('secMsg').className = 'msg ok';
+    $('secMsg').textContent = r.body.note || '密钥已生成，请立即下载保存。';
+  }
+  function downloadKey(){
+    if (!currentKey) return;
+    var blob = new Blob([currentKey + '\n'], { type:'text/plain;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'pc-admin-login-key-' + new Date().toISOString().slice(0,10) + '.txt';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 1000);
+  }
+  async function revokeKey(){
+    $('secMsg').className = 'msg err';
+    if (!window.confirm('确定吊销当前登录密钥吗？吊销后只能使用口令登录。')) return;
+    var r = await post('/key/revoke', {});
+    if (r.status !== 200) { $('secMsg').textContent = errMsg(r); return; }
+    currentKey = null;
+    $('keyBox').classList.add('hidden');
+    $('btnDownloadKey').classList.add('hidden');
+    $('secMsg').className = 'msg ok';
+    $('secMsg').textContent = '当前登录密钥已吊销。';
+  }
+  async function changePwFromDash(){
+    $('secMsg').className = 'msg err';
+    var p1 = $('inNewPw3').value, p2 = $('inNewPw4').value;
+    if (p1 !== p2) { $('secMsg').textContent = '两次输入的新口令不一致'; return; }
+    var oldPw = window.prompt('请输入当前管理员口令以确认修改：');
+    if (!oldPw) return;
+    var r = await post('/password', { oldPassword: oldPw, newPassword: p1 });
+    if (r.status !== 200) { $('secMsg').textContent = errMsg(r); return; }
+    $('inNewPw3').value = $('inNewPw4').value = '';
+    $('secMsg').className = 'msg ok';
+    $('secMsg').textContent = '口令已更新。';
+  }
+
+  async function doLogout(){
+    await post('/logout', {});
+    $('dash').classList.add('hidden');
+    $('changeCard').classList.add('hidden');
+    $('securityCard').classList.add('hidden');
+    $('who').classList.add('hidden');
+    $('loginCard').classList.remove('hidden');
+    $('loginMsg').textContent = '';
+  }
+
+  window.switchTab = switchTab;
+  window.loginPw = loginPw;
+  window.loginKey = loginKey;
+  window.changePw = changePw;
+  window.changePwFromDash = changePwFromDash;
+  window.doLogout = doLogout;
+  window.loadRooms = loadRooms;
+  window.destroyRoom = destroyRoom;
+  window.genKey = genKey;
+  window.downloadKey = downloadKey;
+  window.revokeKey = revokeKey;
+  window.showSecurity = showSecurity;
+
+  boot();
 })();
 </script>
 </body>

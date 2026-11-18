@@ -1806,8 +1806,13 @@ window.PCMedia = function (ctx) {
     if (countdown) clearInterval(countdown);
     if (net) net.close();
     if (media && media.inCall()) media.hangup();
+    /* Lock the deluxe game UI too: the room can be destroyed by the owner or
+     * an admin while cards are on the table; without this, taps on 出牌/过牌
+     * reached a closed socket and logged confusing "连接未就绪" rejects. */
+    if (window.PCDeluxe && window.PCDeluxe.setExpired) window.PCDeluxe.setExpired();
     $('input').disabled = true;
     $('btn-send').disabled = true;
+    var gp = $('btn-game'); if (gp) gp.disabled = true;
     clearNickname();
     clearUK(state.config.roomId).then(function () { /* local plaintext cleared */ });
   }

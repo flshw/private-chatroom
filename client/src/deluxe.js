@@ -7,6 +7,7 @@
  */
 window.PCDeluxe = (function () {
   var game = null, ctx = null, selected = {};
+  var expiredUI = false;  // room destroyed/expired: lock every game control
   var membersList = [], mySid = null, picked = [], setupOpen = false;
   var partnerPick = null;   // sid of chosen 对家 (teammate)
   var spread = false; // false = stacked by rank (default), true = flat (v24: set by 平铺 cycle mode)
@@ -462,7 +463,31 @@ window.PCDeluxe = (function () {
     renderSettle(st);
   }
 
+  /* Room destroyed/expired: lock every game control so taps never reach a dead
+   * socket (which produced confusing "连接未就绪，消息未发送" rejects). Call
+   * from app.js handleExpiry() — the single expiry path. */
+  function setExpired() {
+    expiredUI = true;
+    var ids = ['btn-game', 'btn-game-start', 'btn-game-play', 'btn-game-pass',
+      'btn-game-arrange', 'btn-settle-next', 'btn-voice-live'];
+    ids.forEach(function (id) {
+      var b = $(id);
+      if (!b) return;
+      b.disabled = true;
+      b.classList.add('muted');
+      b.title = '房间已解散或到期，无法继续操作';
+    });
+    var start = $('btn-game-start'); if (start) start.classList.add('hidden');
+    showSetup(false);
+    var settle = $('game-settle'), settleMask = $('game-settle-mask');
+    if (settle) settle.classList.add('hidden');
+    if (settleMask) settleMask.classList.add('hidden');
+    var gamePanel = $('game-panel');
+    if (gamePanel && ctx && ctx.toast) ctx.toast('房间已解散或到期，牌局已锁定');
+  }
+
   function toggleGame() {
+    if (expiredUI) { if (ctx && ctx.toast) ctx.toast('房间已解散或到期，无法继续操作'); return; }
     var p = $('game-panel'); if (!p) return;
     var btn = $('btn-game');
     if (btn && btn.disabled) {
@@ -485,6 +510,7 @@ window.PCDeluxe = (function () {
   }
 
   function onPlayClick() {
+    if (expiredUI) { if (ctx && ctx.toast) ctx.toast('房间已解散或到期，无法继续操作'); return; }
     var ids = Object.keys(selected).filter(function (k) { return selected[k]; });
     if (!ids.length) { ctx.toast('先点选要出的牌'); return; }
     // play() is synchronous and repaints optimistically (incl. the table play
@@ -494,7 +520,10 @@ window.PCDeluxe = (function () {
     if (ok) selected = {};
   }
 
-  function onPassClick() { game.pass(); }
+  function onPassClick() {
+    if (expiredUI) { if (ctx && ctx.toast) ctx.toast('房间已解散或到期，无法继续操作'); return; }
+    game.pass();
+  }
 
   /* v25: one short-labelled button cycles 平铺 → 堆叠 → 火力 → 少手 → back.
    * The engine performs the reorder and reports label + spread; the button
@@ -513,6 +542,7 @@ window.PCDeluxe = (function () {
   }
 
   function onStartClick() {
+    if (expiredUI) { if (ctx && ctx.toast) ctx.toast('房间已解散或到期，无法继续操作'); return; }
     if (!game) return;
     if (picked.length !== 3) { if (ctx) ctx.toast('请先选择另外 3 名玩家'); return; }
     var watching = watcherMap();
@@ -722,6 +752,7 @@ window.PCDeluxe = (function () {
 
   return {
     bind: bind, onMembers: onMembers, onGameState: onGameState, renderGame: renderGame,
+    setExpired: setExpired,
     pipShowStatus: pipShowStatus,
     selectCard: function (id) { selected[id] = !selected[id]; },
     _selected: function () { return selected; }

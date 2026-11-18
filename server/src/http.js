@@ -89,7 +89,7 @@ function makeServer(handler) {
 }
 
 function createHttpServer(options) {
-  const { accounts, rooms, hub, db, keyStore, logger, connLog, shares } = options;
+  const { accounts, rooms, hub, db, keyStore, logger, connLog, shares, adminAuth } = options;
   const trace = connLog || (() => {});
   const API = config.apiPrefix;
   const PUB = config.publicPrefix;
@@ -290,31 +290,134 @@ function createHttpServer(options) {
       return sendJson(res, 200, { ok: true, file: { id: f.id, size: f.size, iv: f.iv, ct, tag: f.tag } });
     }
 
-    /* ---- admin (reserved; no approval queue by design) ---- */
+    /* ---- admin console auth (separate from chat accounts) ---- */
+    function adminSid(req, url) {
+      const cookie = String(req.headers.cookie || '');
+      const m = cookie.match(/(?:^|;\s*)pc_admin_sid=([a-f0-9]{64})/i);
+      return (m && m[1]) || '';
+    }
+    function requireAdminSession(req, url) {
+      const sess = adminAuth ? adminAuth.session(adminSid(req, url)) : null;
+      if (!sess) {
+        const err = new Error('请先登录管理后台'); err.status = 401; throw err;
+      }
+      if (adminAuth.status().mustChange && pathname !== API + '/admin/password') {
+        const err = new Error('首次登录请先修改口令'); err.status = 403; throw err;
+      }
+      return sess;
+    }
+    function setAdminCookie(sid, maxAgeSec) {
+      const secure = (config.tlsCert || config.serverUrl.startsWith('https://')) ? '; Secure' : '';
+      res.setHeader('Set-Cookie', 'pc_admin_sid=' + sid +
+        '; Path=/; HttpOnly; SameSite=Strict' + secure + '; Max-Age=' + maxAgeSec);
+    }
+    // Only accept state-changing admin POSTs from same-origin pages. With
+    // SameSite=Strict cookies this is defence-in-depth against CSRF.
+    function checkAdminOrigin(req) {
+      const origin = req.headers.origin;
+      if (!origin) return; // non-browser clients (curl/scripts) allowed
+      let host = req.headers.host || '';
+      let ok = false;
+      try {
+        const u = new URL(origin);
+        ok = u.host === host || u.host === new URL(config.serverUrl).host;
+      } catch (e) { ok = false; }
+      if (!ok) { const err = new Error('来源校验失败'); err.status = 403; throw err; }
+    }
+
+    if (pathname === API + '/admin/status' && req.method === 'GET') {
+      if (!adminAuth) return sendJson(res, 503, { ok: false, error: '管理后台未启用' });
+      const sess = adminAuth.session(adminSid(req, url));
+      return sendJson(res, 200, Object.assign({}, adminAuth.status(), {
+        authenticated: !!sess, sid: sess ? sess.sid : null
+      }));
+    }
+    if (pathname === API + '/admin/login' && req.method === 'POST') {
+      try {
+        checkAdminOrigin(req);
+        const b = await readJson(req);
+        const sess = adminAuth.loginPassword(clientIp(req), b.password);
+        setAdminCookie(sess.sid, Math.floor((sess.expiresAt - Date.now()) / 1000));
+        return sendJson(res, 200, { ok: true, mustChange: adminAuth.status().mustChange });
+      } catch (e) { return sendJson(res, e.status || 400, { ok: false, error: e.message }); }
+    }
+    if (pathname === API + '/admin/login-key' && req.method === 'POST') {
+      try {
+        checkAdminOrigin(req);
+        const b = await readJson(req);
+        const sess = adminAuth.loginKey(clientIp(req), b.key);
+        setAdminCookie(sess.sid, Math.floor((sess.expiresAt - Date.now()) / 1000));
+        return sendJson(res, 200, { ok: true, mustChange: adminAuth.status().mustChange });
+      } catch (e) { return sendJson(res, e.status || 400, { ok: false, error: e.message }); }
+    }
+    if (pathname === API + '/admin/logout' && req.method === 'POST') {
+      try { adminAuth.logout(adminSid(req, url)); } catch (e) {}
+      res.setHeader('Set-Cookie', 'pc_admin_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0');
+      return sendJson(res, 200, { ok: true });
+    }
+    if (pathname === API + '/admin/password' && req.method === 'POST') {
+      try {
+        checkAdminOrigin(req);
+        requireAdminSession(req, url);
+        const b = await readJson(req);
+        adminAuth.changePassword(b.oldPassword, b.newPassword);
+        return sendJson(res, 200, { ok: true, mustChange: false });
+      } catch (e) { return sendJson(res, e.status || 400, { ok: false, error: e.message }); }
+    }
+    if (pathname === API + '/admin/key' && req.method === 'POST') {
+      try {
+        checkAdminOrigin(req);
+        requireAdminSession(req, url);
+        const key = adminAuth.createKey();
+        return sendJson(res, 200, { ok: true, key,
+          note: '请立即下载保存，此密钥仅显示一次；重新生成会使旧密钥失效。' });
+      } catch (e) { return sendJson(res, e.status || 400, { ok: false, error: e.message }); }
+    }
+    if (pathname === API + '/admin/key/revoke' && req.method === 'POST') {
+      try {
+        checkAdminOrigin(req);
+        requireAdminSession(req, url);
+        return sendJson(res, 200, adminAuth.revokeKey());
+      } catch (e) { return sendJson(res, e.status || 400, { ok: false, error: e.message }); }
+    }
+
+    /* ---- admin rooms (reserved; no approval queue by design) ---- */
     if (pathname === API + '/admin/rooms' && req.method === 'GET') {
-      // SECURITY: admin token must travel in a header only — a URL query would
-      // leak it into browser history, Referer and reverse-proxy access logs.
-      const token = req.headers['x-pc-admin-token'] || '';
-      if (!token || token !== (process.env.PC_ADMIN_TOKEN || '')) {
-        return sendJson(res, 403, { ok: false, error: '无权操作' });
+      // Backward compatibility: the legacy PC_ADMIN_TOKEN header still works
+      // for scripts; browser clients use the HttpOnly admin session cookie.
+      const legacy = req.headers['x-pc-admin-token'] || '';
+      const legacyOk = legacy && process.env.PC_ADMIN_TOKEN && legacy === process.env.PC_ADMIN_TOKEN;
+      if (!legacyOk) {
+        try { requireAdminSession(req, url); }
+        catch (e) { return sendJson(res, e.status || 403, { ok: false, error: e.message }); }
       }
       const now = Date.now();
-      const rows = db.all("SELECT id,name,status,expires_at FROM rooms WHERE status!='destroyed' ORDER BY created_at DESC");
-      return sendJson(res, 200, { ok: true, rooms: rows.map(r => ({
-        roomId: r.id, name: r.name, status: r.status, expiresAt: r.expires_at,
-        remainSeconds: Math.max(0, Math.floor((r.expires_at - now) / 1000))
-      })) });
+      const rows = db.all("SELECT * FROM rooms WHERE status!='destroyed' ORDER BY created_at DESC");
+      const out = rows.map(r => {
+        const online = hub.onlineCount ? hub.onlineCount(r.id) : (hub.byRoom && hub.byRoom.has(r.id) ? hub.byRoom.get(r.id).size : 0);
+        return {
+          roomId: r.id, name: r.name, status: r.status,
+          ownerId: r.owner_id, ttlSeconds: r.ttl_seconds, maxMembers: r.max_members,
+          createdAt: r.created_at, expiresAt: r.expires_at,
+          remainSeconds: Math.max(0, Math.floor((r.expires_at - now) / 1000)),
+          onlineCount: online,
+          revoked: !!r.revoke_at
+        };
+      });
+      const s = hub.stats();
+      return sendJson(res, 200, { ok: true, rooms: out,
+        stats: { total: out.length, onlineClients: s.clients, activeRooms: s.rooms,
+          pendingCleanup: db.all("SELECT COUNT(*) AS n FROM rooms WHERE status IN ('issued','active') AND expires_at<=?", [now])[0].n },
+        serverTime: now });
     }
     m = pathname.match(new RegExp('^' + API + '/admin/rooms/([A-Za-z0-9_]+)/destroy$'));
     if (m && req.method === 'POST') {
-      // Controlled by an admin token header; local-only in v0.1 deployment.
-      // SECURITY: admin token must travel in a header only — a URL query would
-      // leak it into browser history, Referer and reverse-proxy access logs.
-      const token = req.headers['x-pc-admin-token'] || '';
-      if (!token || token !== (process.env.PC_ADMIN_TOKEN || '')) {
-        return sendJson(res, 403, { ok: false, error: '无权操作' });
-      }
-      return sendJson(res, 200, Object.assign({ ok: true }, rooms.destroy(m[1], 'admin')));
+      const legacy = req.headers['x-pc-admin-token'] || '';
+      const legacyOk = legacy && process.env.PC_ADMIN_TOKEN && legacy === process.env.PC_ADMIN_TOKEN;
+      try {
+        if (!legacyOk) { checkAdminOrigin(req); requireAdminSession(req, url); }
+        return sendJson(res, 200, Object.assign({ ok: true }, rooms.destroy(m[1], 'admin')));
+      } catch (e) { return sendJson(res, e.status || 403, { ok: false, error: e.message }); }
     }
 
     return sendText(res, 404, '404 Not Found');

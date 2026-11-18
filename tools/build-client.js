@@ -123,6 +123,9 @@ const deluxeParts = Object.assign({
   '__DELUXE__': safeJs(read('client/src/deluxe.js'))
 }, baseParts);
 const deluxeMarkers = baseMarkers.concat([
+  ['到期锁定游戏控件', 'function setExpired()'],
+  ['到期锁定接入', 'window.PCDeluxe.setExpired) window.PCDeluxe.setExpired()'],
+  ['出牌端到期守卫', 'if (expiredUI) { if (ctx && ctx.toast) ctx.toast(\'房间已解散或到期，无法继续操作\'); return; }'],
   ['3D 画布层级', '#chat>#scene3d{position:fixed;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}'],
   ['刷新自动续进', 'var nick = savedNickname();'],
   ['两版通用续进', 'if (cached && nick) {'],

@@ -16,6 +16,7 @@ const { Rooms } = require('./rooms');
 const { Hub } = require('./hub');
 const { Shares } = require('./shares');
 const { createHttpServer } = require('./http');
+const { AdminAuth } = require('./admin-auth');
 const { config, DATA_DIR, LOG_DIR } = require('./paths');
 
 const verbose = process.argv.indexOf('--verbose') !== -1;
@@ -41,12 +42,13 @@ function connLog(msg) {
   if (verbose) console.log('CONN ' + msg);
 }
 
-let httpServer, wss, heartbeat, sweepTimer, db;
+let httpServer, wss, heartbeat, sweepTimer, db, adminAuth;
 
 async function boot() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   db = new Database(logger);
   await db.init();
+  adminAuth = new AdminAuth(logger).init();
   const keys = new KeyStore(logger).init();
   const accounts = new Accounts(db, logger);
   const issuer = new Issuer(db, keys, P.canonicalJSON, logger);
@@ -55,7 +57,7 @@ async function boot() {
   const rooms = new Rooms(db, keys, issuer, accounts, hub, logger);
   rooms.shares = shares;
   hub.rooms = rooms;
-  const srv = createHttpServer({ accounts, rooms, hub, db, keyStore: keys, logger, connLog, shares });
+  const srv = createHttpServer({ accounts, rooms, hub, db, keyStore: keys, logger, connLog, shares, adminAuth });
   httpServer = srv.server;
   wss = srv.wss;
   heartbeat = srv.heartbeat;
@@ -82,6 +84,7 @@ function shutdown(signal) {
   if (sweepTimer) clearInterval(sweepTimer);
   if (heartbeat) clearInterval(heartbeat);
   try { if (wss) for (const ws of wss.clients) ws.terminate(); } catch (e) { /* noop */ }
+  if (adminAuth) { try { adminAuth.close(); } catch (e) { /* noop */ } }
   if (httpServer) httpServer.close(() => { if (db) db.close(); process.exit(0); });
   else { if (db) db.close(); process.exit(0); }
   setTimeout(() => process.exit(0), 3000).unref();
