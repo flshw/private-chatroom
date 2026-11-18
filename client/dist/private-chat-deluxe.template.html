@@ -34,6 +34,17 @@ input[type=text]{
   background:#0e1528;color:var(--ink);outline:none;font-size:15px;
 }
 input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,140,255,.15)}
+/* Random nickname: input + dice button share one row. */
+.nick-line{display:flex;gap:8px;align-items:stretch}
+.nick-line input[type=text]{flex:1;min-width:0}
+.nick-dice{
+  flex:0 0 auto;white-space:nowrap;border:1px solid var(--brand2);border-radius:11px;
+  padding:0 14px;cursor:pointer;font-size:14px;font-weight:600;
+  color:#d9d2ff;background:linear-gradient(135deg,rgba(91,140,255,.22),rgba(130,110,255,.22));
+  transition:transform .12s ease,border-color .12s ease;
+}
+.nick-dice:hover{transform:translateY(-1px);border-color:var(--brand);color:#fff}
+.nick-dice:active{transform:translateY(0)}
 .primary{
   border:none;border-radius:11px;padding:12px 18px;font-weight:650;cursor:pointer;color:#fff;
   background:linear-gradient(135deg,var(--brand),var(--brand2));box-shadow:0 8px 20px rgba(91,140,255,.28);
@@ -233,8 +244,9 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
 
 /* v24: one single control row — 理牌(循环) / 过牌 / 出牌. */
 .game-bottom{display:flex;gap:10px;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
-.game-bottom .tool-btn{min-width:92px;text-align:center}
-.game-bottom #btn-game-arrange{flex:1.15 1 0}
+.game-bottom .tool-btn{min-width:92px;text-align:center;flex:1 1 0}
+/* v25: 理牌 button stays NORMAL width (same as 过牌/出牌) — the short label
+ * (↔平铺/▤堆叠/🔥火力/🀄少手) fits without the old flex:1.15 widening. */
 .game-log{position:absolute;left:16px;top:59%;transform:translateY(-50%);z-index:6;
   width:224px;max-height:40vh;overflow-y:scroll;overflow-x:hidden;color:var(--ink);font-size:12.5px;line-height:1.7;
   border:1px solid var(--line);border-radius:12px;padding:10px 12px;
@@ -495,7 +507,10 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     <div class="brand"><span class="dot"></span><span id="gate-room">私密聊天</span> <span class="deluxe-badge">豪华版</span></div>
     <div class="meta-line"><span id="gate-remain">—</span> · <span id="gate-count">—</span></div>
     <label for="nickname">你的昵称</label>
-    <input id="nickname" type="text" maxlength="24" autocomplete="off" placeholder="输入昵称后进入" />
+    <div class="nick-line">
+      <input id="nickname" type="text" maxlength="24" autocomplete="off" placeholder="输入昵称，或随机生成一个" />
+      <button id="btn-random-nick" class="nick-dice" type="button" title="随机生成一个中文昵称">🎲 随机</button>
+    </div>
     <button id="btn-enter" class="primary">进入房间</button>
     <div class="status" id="gate-status"></div>
     <div class="key-note" title="进入时在本机生成密钥对，私钥永不上传服务器">🔒 密钥仅存本机 · 3D / 语音 / 掼蛋全部端到端加密</div>
@@ -540,7 +555,7 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     <div class="game-log" id="game-log"></div>
     <div class="my-hand" id="my-hand"></div>
     <div class="game-bottom">
-      <button class="tool-btn" id="btn-game-arrange" title="循环切换理牌方案（炸弹优先 / 手数最少 / 平铺）">🀄 理牌</button>
+      <button class="tool-btn" id="btn-game-arrange" title="点击循环：平铺→堆叠→火力→少手">🀄 理牌</button>
       <button class="tool-btn" id="btn-game-pass">过牌</button>
       <button class="tool-btn" id="btn-game-play">出牌</button>
     </div>
@@ -1001,6 +1016,70 @@ window.PCConfig = (function () {
 
   return { load: load, verify: verify };
 })();
+
+</script>
+<script>
+/*
+ * Copyright (c) 2026 CJS flshw@126.com
+ * Private Chatroom · random Chinese nickname pool (short-drama / comic-drama
+ * style). Compiled from popular web-novel & 微短剧 character names (柳如烟、
+ * 沈知意、叶凡…), the 小X/如X family, and soft 2-3 character net names.
+ * UMD: window.PCNicknames in browsers, module.exports in Node (unit tests).
+ */
+(function (root, factory) {
+  var api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.PCNicknames = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+
+  /* ~100 popular short-drama / comic-drama style names, all 2-3 Chinese chars. */
+  var NAMES = [
+    /* 小X 家族（萌系） */
+    '小帅', '小美', '小可爱', '小仙女', '小妖精', '小机灵', '小奶龙', '小甜心',
+    '小橘子', '小栗子', '小葡萄', '小汤圆', '小布丁', '小糯米', '小丸子', '小鱼干',
+    /* 如X / 柳X 家族（网文经典） */
+    '如烟', '如意', '如梦', '如初', '柳如烟', '柳如意', '柳如眉', '柳如梦',
+    /* 温柔小白花女主 */
+    '沈知意', '林晚晴', '苏清颜', '温知夏', '苏晚', '苏念希', '温软', '阮软',
+    '夏晚星', '白若溪', '林知柔', '温初夏', '苏星晚', '江凌玥', '叶凝霜',
+    /* 大女主 / 飒爽逆袭 */
+    '楚清辞', '顾清鸢', '沈惊鸿', '唐凝月', '云灵汐', '洛九鸢', '慕晚晴', '秦晚卿',
+    /* 霸总 / 男主 */
+    '叶凡', '秦无道', '顾霆琛', '厉景深', '陆景川', '季铭修', '傅景深', '顾夜宸',
+    '薄司寒', '战北寒', '凌御爵', '墨霆枭', '沈知衍', '陆执渊', '封夜寒',
+    /* 清冷斯文男主 */
+    '谢砚辞', '宋聿修', '裴砚辞', '周霆深', '秦墨渊', '封时序', '苏砚辰', '温景然',
+    /* 古风 / 仙侠 */
+    '子墨', '倾城', '浅陌', '若曦', '沐辰', '夜殇', '墨渊', '白夜',
+    '青鸾', '扶苏', '长歌', '南风', '北辰', '知雪', '无涯', '知遥',
+    /* 可爱 2 字 */
+    '团子', '糖果', '喵喵', '朵朵', '莉莉', '安安', '琪琪', '萌萌',
+    /* 情绪氛围类 */
+    '心动', '遇见', '偏爱', '温柔', '清欢', '旧梦', '初见', '余生'
+  ];
+
+  /* Guard: keep only valid 2-3 character Chinese strings. */
+  var VALID = NAMES.filter(function (s) {
+    return /^[\u4e00-\u9fa5]{2,3}$/.test(s);
+  });
+
+  function random() {
+    if (!VALID.length) return 'Anonymous';
+    return VALID[Math.floor(Math.random() * VALID.length)];
+  }
+
+  /* Pick n distinct names (used for the 3 local bots). */
+  function pick(n) {
+    var pool = VALID.slice(), out = [];
+    while (n-- > 0 && pool.length) {
+      out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    }
+    return out;
+  }
+
+  return { list: VALID, names: VALID, random: random, pick: pick };
+});
 
 </script>
 <script>
@@ -2066,24 +2145,36 @@ window.PCMedia = function (ctx) {
         if (have.length === 4) take(have);
       });
     }
+    /* v25: a straight is capped at FIVE cards (user rule). A longer run is
+     * split into consecutive 5-card chunks; a trailing remainder < 5 stays in
+     * the pool for other combos instead of forming an over-long straight. */
+    var MAX_RUN = 5;
     function takeStraightFlushes() {
       ['S', 'H', 'C', 'D'].forEach(function (suit) {
         var sc = pool.filter(function (c) { return c.s === suit && c.r >= 3 && c.r <= 14; });
-        consecutiveRuns(sc.map(function (c) { return c.r; }), 5).forEach(function (run) {
-          var cs = [];
-          run.forEach(function (r) { var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c); });
-          take(cs);
+        consecutiveRuns(sc.map(function (c) { return c.r; }), MAX_RUN).forEach(function (run) {
+          for (var i = 0; i + MAX_RUN <= run.length; i += MAX_RUN) {
+            var cs = [];
+            run.slice(i, i + MAX_RUN).forEach(function (r) {
+              var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c);
+            });
+            take(cs);
+          }
         });
       });
     }
     function takeStraights() {
       var runs = consecutiveRuns(Object.keys(rankCounts(pool)).map(Number).filter(function (r) {
         return r >= 3 && r <= 14;
-      }), 5);
+      }), MAX_RUN);
       runs.forEach(function (run) {
-        var cs = [];
-        run.forEach(function (r) { var c = pickRank(pool, r, 1)[0]; if (c) cs.push(c); });
-        take(cs);
+        for (var i = 0; i + MAX_RUN <= run.length; i += MAX_RUN) {
+          var cs = [];
+          run.slice(i, i + MAX_RUN).forEach(function (r) {
+            var c = pickRank(pool, r, 1)[0]; if (c) cs.push(c);
+          });
+          take(cs);
+        }
       });
     }
     function takeDoubleStraights() {
@@ -2104,33 +2195,21 @@ window.PCMedia = function (ctx) {
         take(cs);
       });
     }
-    function takeTriplePairs() {
-      var guard = 0;
-      while (guard++ < 14) {
-        var c = rankCounts(pool);
-        var trips = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 3 && r <= 15; })
-          .sort(function (a, b) { return a - b; });
-        var pairs = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 2 && r <= 15; })
-          .sort(function (a, b) { return a - b; });
-        var done = false;
-        for (var t = 0; t < trips.length && !done; t++) {
-          for (var p = 0; p < pairs.length; p++) {
-            if (pairs[p] === trips[t]) continue;
-            var three = pickRank(pool, trips[t], 3), two = pickRank(pool, pairs[p], 2);
-            if (three.length === 3 && two.length === 2 && take(three.concat(two))) { done = true; break; }
-          }
-        }
-        if (!done) break;
-      }
-    }
+    /* v25: 三带二 is intentionally NOT fused into a 5-card combo any more —
+     * triples and pairs are laid out separately by takeRest(). */
+
+    /* v25: remainder is laid out as THREE-card groups then PAIRS then singles
+     * — i.e. 三带二 is NOT fused into one 5-card combo. Triples must be taken
+     * BEFORE pairs, otherwise the pair pass eats 2 of a 3-of-a-kind and leaves
+     * a stray single. */
     function takeRest() {
       var cnt = rankCounts(pool);
       Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-        if (cnt[r] >= 2) take(pickRank(pool, r, 2));
+        if (cnt[r] >= 3) take(pickRank(pool, r, 3));
       });
       cnt = rankCounts(pool);
       Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-        if (cnt[r] >= 3) take(pickRank(pool, r, 3));
+        if (cnt[r] >= 2) take(pickRank(pool, r, 2));
       });
       pool.forEach(function (c) { take([c]); });
     }
@@ -2141,12 +2220,12 @@ window.PCMedia = function (ctx) {
     if (bombsFirst) {
       // 火力集中: bombs & straight flushes first, then fold the remainder.
       takeBombs(); takeStraightFlushes(); takeStraights();
-      takeDoubleStraights(); takeTripleStraights(); takeTriplePairs(); takeRest();
+      takeDoubleStraights(); takeTripleStraights(); takeRest();
     } else {
       // 少手数: long runs & straight flushes first to shed many cards with one
       // trick, THEN keep bombs intact. Small cards get absorbed into runs.
       takeStraightFlushes(); takeStraights(); takeDoubleStraights();
-      takeTripleStraights(); takeTriplePairs(); takeBombs(); takeRest();
+      takeTripleStraights(); takeBombs(); takeRest();
     }
     return {
       groups: groups,
@@ -2498,7 +2577,17 @@ window.PCGameClient = (function () {
    * their hands in plaintext locally and drives their moves over the E2EE game
    * channel, so the server still sees ciphertext only. */
   var BOT_SIDS = ['bot_1', 'bot_2', 'bot_3'];
-  var BOT_NICKS = ['🤖 牌手1', '🤖 牌手2', '🤖 牌手3'];
+  /* v25: bot names come from the SAME shared short-drama nickname pool as the
+   * gate's random button. Fixed picks (not random) so every client computes an
+   * identical roster — a random pick here would desync seat/nickname lists. */
+  var BOT_NAME_SEEDS = ['小美', '柳如烟', '叶凡'];
+  var BOT_NICKS = (function () {
+    var pool = (window.PCNicknames && window.PCNicknames.list) || [];
+    return BOT_NAME_SEEDS.map(function (seed, i) {
+      if (pool.indexOf(seed) !== -1) return seed;
+      return pool.length ? pool[i % pool.length] : ('牌手' + (i + 1));
+    });
+  })();
 
   function create(ctx) {
     var self = {};
@@ -2526,7 +2615,10 @@ window.PCGameClient = (function () {
     var botThinkMs = 1400;               // slower: give a human a clear window to tap 过牌/出牌 before the bot grabs the turn
     var botWatchdog = null;              // safety net: re-drive a bot if its move never advances the turn
     var BOT_WATCHDOG_MS = 5000;          // > botThinkMs + one E2EE round trip; only fires on a stuck turn
-    var arrangeMode = 0;                 // v24: 0/1 = 两种理牌方案, 2 = 平铺(点数序)
+    /* v25: 4-mode cycle — 0=平铺(点数序,平铺显示) 1=堆叠(同点数纵向叠放)
+     * 2=火力集中(炸弹/同花顺组合) 3=少手数(顺子/连对优先组合). */
+    var ARRANGE_LABELS = ['↔ 平铺', '▤ 堆叠', '🔥 火力', '🀄 少手'];
+    var arrangeMode = -1;                // -1 = 未整理(默认), 首点进入 0=平铺
 
     /* --- Bot behaviour diagnostics ---------------------------------------
      * A separate, timestamped trace of the whole bot driver: scheduling,
@@ -2839,7 +2931,7 @@ window.PCGameClient = (function () {
       state.lastWinner = null; state._myPassPending = 0;
       state.finishOrder = []; state.log = []; state.played = [];
       state.result = null; state.seatPlays = {}; state.playedBySeat = {};   // fresh round
-      state.arrangeGroups = null; arrangeMode = 0;   // reset 理牌 cycle each deal
+      state.arrangeGroups = null; arrangeMode = -1;   // reset 理牌 cycle each deal (v25: -1→平铺)
       if (msg.partner) state.partnerSid = msg.partner;
       state.botHands = state.botHands || {};
       if (msg.order && msg.order.length === 4) state.players = msg.order.slice();
@@ -3513,35 +3605,37 @@ window.PCGameClient = (function () {
     }
     function requestDeal() { sendGame({ kind: 'deal_request', requestBy: mySid }); }
 
-    /* v24: auto-arrange cycles through 火力集中 / 少手数 / 平铺(点数序).
-     * Only the LOCAL display order changes — card ids and E2EE game data are
-     * untouched. The button label is returned so the UI can show the mode. */
+    /* v25: the 理牌 button cycles 平铺 → 堆叠 → 火力 → 少手 → 平铺…
+     * Only the LOCAL display order changes — card ids and E2EE data are intact.
+     * mode 0 平铺: rank order, cards laid flat (no fan, no combo labels).
+     * mode 1 堆叠: rank order, same-rank cards fanned vertically (default).
+     * mode 2 火力: bomb/flush-first combos, labelled fans.
+     * mode 3 少手: straight/pair-first combos (fewer tricks), labelled fans. */
     function autoArrange() {
       if (!window.PCBots || !window.PCGame) return null;
       var view = state.spectator ? state.targetHand : state.hand;
       if (!view || !view.length) return null;
-      arrangeMode = (arrangeMode + 1) % 3;
-      var arrangement;
-      if (arrangeMode === 2) {
-        // 平铺: plain rank order (strongest first), no grouping.
-        arrangement = (window.PCGame.sortHandForView)
-          ? { order: window.PCGame.sortHandForView(view, state.level), label: '平铺 · 点数序' }
-          : { order: view.slice(), label: '平铺' };
+      arrangeMode = (arrangeMode + 1) % 4;
+      var order, groups = null;
+      var rankOrder = window.PCGame.sortHandForView
+        ? window.PCGame.sortHandForView(view, state.level) : view.slice();
+      if (arrangeMode === 0 || arrangeMode === 1) {
+        order = rankOrder;                       // 平铺 / 堆叠 share point order
       } else {
         var schemes = window.PCBots.arrangeSchemes(view, state.level, window.PCGame);
-        var s = schemes[arrangeMode] || schemes[0];
-        arrangement = { order: s.order, label: s.name };
-        // Record the grouping so the UI can label each combo stack.
-        state.arrangeGroups = s.groups.map(function (g) {
+        var s = schemes[arrangeMode - 2] || schemes[0];
+        order = s.order;
+        groups = s.groups.map(function (g) {
           return { name: g.pattern.name, ids: g.cards.map(function (c) { return c.id; }) };
         });
       }
-      if (arrangeMode === 2) state.arrangeGroups = null;
-      if (state.spectator) state.targetHand = arrangement.order;
-      else state.hand = arrangement.order;
-      note('已' + arrangement.label + '（仅本机显示顺序，牌局数据不变）');
+      state.arrangeGroups = groups;
+      if (state.spectator) state.targetHand = order;
+      else state.hand = order;
+      var label = ARRANGE_LABELS[arrangeMode];
+      note('已切换：' + label.replace(/^\S+\s/, '') + '（仅本机显示，牌局数据不变）');
       onUpdate(state);
-      return { mode: arrangeMode, label: arrangement.label };
+      return { mode: arrangeMode, label: label, spread: arrangeMode === 0 };
     }
 
     self.arrangeMode = function () { return arrangeMode; };
@@ -4226,18 +4320,18 @@ window.PCDeluxe = (function () {
 
   function onPassClick() { game.pass(); }
 
-  /* v24: one button cycles 理牌① 火力集中 → 理牌② 少手数 → 平铺 → back.
-   * The engine performs the reorder and reports the label; the button mirrors
-   * it. `spread` (flat render) is on only for the 平铺 mode. */
+  /* v25: one short-labelled button cycles 平铺 → 堆叠 → 火力 → 少手 → back.
+   * The engine performs the reorder and reports label + spread; the button
+   * mirrors it with a compact label so it keeps a normal (equal-width) size. */
   function onArrangeClick() {
     if (!game) return;
     var r = game.autoArrange && game.autoArrange();
     if (!r) { ctx.toast('暂无可整理的手牌'); return; }
-    spread = (r.mode === 2);
+    spread = !!r.spread;
     var b = $('btn-game-arrange');
     if (b) {
-      b.textContent = r.mode === 2 ? '↔ 平铺' : (r.mode === 0 ? '🀄 理牌① 火力' : '🀄 理牌② 少手');
-      b.title = '当前：' + r.label + ' · 点击循环切换理牌方案';
+      b.textContent = r.label;
+      b.title = '当前：' + r.label.replace(/^\S+\s/, '') + ' · 点击循环：平铺→堆叠→火力→少手';
     }
     renderGame(game.state);
   }
@@ -5065,6 +5159,16 @@ window.PCDeluxe = (function () {
   /* --- wire events --- */
   $('btn-enter').addEventListener('click', enter);
   $('nickname').addEventListener('keydown', function (e) { if (e.key === 'Enter') enter(); });
+  // Random Chinese nickname (short-drama style). Avoid repeating the current
+  // value so consecutive taps visibly change the name.
+  function randomNickname() {
+    if (!window.PCNicknames || !window.PCNicknames.random) return;
+    var cur = $('nickname').value.trim(), next = cur, tries = 0;
+    while (next === cur && tries++ < 12) next = window.PCNicknames.random();
+    $('nickname').value = next;
+    status('gate-status', '已生成昵称：' + next, 'ok');
+  }
+  $('btn-random-nick') && $('btn-random-nick').addEventListener('click', randomNickname);
   $('btn-send').addEventListener('click', sendText);
   $('input').addEventListener('keydown', function (e) { if (e.key === 'Enter') sendText(); });
   $('btn-members').addEventListener('click', function () { $('members-panel').classList.toggle('hidden'); });

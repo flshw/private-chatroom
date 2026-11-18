@@ -129,8 +129,9 @@ BASE_STYLES_PLACEHOLDER
 
 /* v24: one single control row — 理牌(循环) / 过牌 / 出牌. */
 .game-bottom{display:flex;gap:10px;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
-.game-bottom .tool-btn{min-width:92px;text-align:center}
-.game-bottom #btn-game-arrange{flex:1.15 1 0}
+.game-bottom .tool-btn{min-width:92px;text-align:center;flex:1 1 0}
+/* v25: 理牌 button stays NORMAL width (same as 过牌/出牌) — the short label
+ * (↔平铺/▤堆叠/🔥火力/🀄少手) fits without the old flex:1.15 widening. */
 .game-log{position:absolute;left:16px;top:59%;transform:translateY(-50%);z-index:6;
   width:224px;max-height:40vh;overflow-y:scroll;overflow-x:hidden;color:var(--ink);font-size:12.5px;line-height:1.7;
   border:1px solid var(--line);border-radius:12px;padding:10px 12px;

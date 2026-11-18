@@ -603,6 +603,16 @@
   /* --- wire events --- */
   $('btn-enter').addEventListener('click', enter);
   $('nickname').addEventListener('keydown', function (e) { if (e.key === 'Enter') enter(); });
+  // Random Chinese nickname (short-drama style). Avoid repeating the current
+  // value so consecutive taps visibly change the name.
+  function randomNickname() {
+    if (!window.PCNicknames || !window.PCNicknames.random) return;
+    var cur = $('nickname').value.trim(), next = cur, tries = 0;
+    while (next === cur && tries++ < 12) next = window.PCNicknames.random();
+    $('nickname').value = next;
+    status('gate-status', '已生成昵称：' + next, 'ok');
+  }
+  $('btn-random-nick') && $('btn-random-nick').addEventListener('click', randomNickname);
   $('btn-send').addEventListener('click', sendText);
   $('input').addEventListener('keydown', function (e) { if (e.key === 'Enter') sendText(); });
   $('btn-members').addEventListener('click', function () { $('members-panel').classList.toggle('hidden'); });

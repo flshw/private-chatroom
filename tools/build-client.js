@@ -29,6 +29,7 @@ const baseParts = {
   '__FORGE__': safeJs(read('vendor/forge.min.js')),
   '__CRYPTO__': safeJs(read('client/src/crypto.js')),
   '__CONFIG__': safeJs(read('client/src/config.js')),
+  '__NICKNAMES__': safeJs(read('shared/nicknames.js')),
   '__MEMBERS__': safeJs(read('client/src/members.js')),
   '__NET__': safeJs(read('client/src/net.js')),
   '__EXPORT__': safeJs(read('client/src/export.js')),
@@ -39,6 +40,9 @@ const baseParts = {
 const baseMarkers = [
   ['PC 协议', 'root.PCProtocol = api'],
   ['配置校验', 'window.PCConfig = (function'],
+  ['随机昵称模块', 'root.PCNicknames = api'],
+  ['随机昵称按钮', 'id="btn-random-nick"'],
+  ['随机昵称生成', 'window.PCNicknames.random()'],
   ['加密模块', 'window.PCCrypto = (function'],
   ['成员表', 'window.PCMembers = (function'],
   ['网络层', 'window.PCNet = function'],
@@ -166,7 +170,8 @@ const deluxeMarkers = baseMarkers.concat([
   ['onPlay最终必推进回合', 'then ALWAYS advance the'],
   ['空手牌机器人顺延', 'Turn landed on a cardless bot'],
   ['自动理牌按钮', 'id="btn-game-arrange"'],
-  ['理牌循环三方案', 'arrangeMode = (arrangeMode + 1) % 3'],
+  ['理牌循环四模式', 'arrangeMode = (arrangeMode + 1) % 4'],
+  ['理牌四模式文案', "var ARRANGE_LABELS = ['↔ 平铺', '▤ 堆叠', '🔥 火力', '🀄 少手']"],
   ['理牌方案生成', 'function arrangeSchemes(hand, level, G)'],
   ['理牌方案按组合堆叠', 'st.arrangeGroups'],
   ['理牌UI用点数排序', 'return window.PCGame.sortHandForView(cards, st.level)'],
@@ -306,7 +311,12 @@ const deluxeMarkers = baseMarkers.concat([
   ['机器人拦牌及时炸', '拦牌·及时炸'],
   ['机器人策略诊断字段', 'move.why'],
   ['组合标签堆叠显示', "'stack-label'"],
-  ['平铺模式按钮文案', "r.mode === 2 ? '↔ 平铺'"]
+  ['理牌按钮正常宽度', 'game-bottom .tool-btn{min-width:92px;text-align:center;flex:1 1 0}'],
+  ['理牌按钮短文案', 'b.textContent = r.label;'],
+  ['顺子封顶5张', 'var MAX_RUN = 5;'],
+  ['三带二不合并', '三带二 is intentionally NOT fused'],
+  ['三张先于对子', 'if (cnt[r] >= 3) take(pickRank(pool, r, 3));'],
+  ['机器人复用昵称池', 'BOT_NAME_SEEDS']
 ]);
 build('豪华版', deluxeParts, deluxeMarkers, 'client/dist/private-chat-deluxe.template.html');
 

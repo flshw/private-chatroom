@@ -20,7 +20,17 @@ window.PCGameClient = (function () {
    * their hands in plaintext locally and drives their moves over the E2EE game
    * channel, so the server still sees ciphertext only. */
   var BOT_SIDS = ['bot_1', 'bot_2', 'bot_3'];
-  var BOT_NICKS = ['🤖 牌手1', '🤖 牌手2', '🤖 牌手3'];
+  /* v25: bot names come from the SAME shared short-drama nickname pool as the
+   * gate's random button. Fixed picks (not random) so every client computes an
+   * identical roster — a random pick here would desync seat/nickname lists. */
+  var BOT_NAME_SEEDS = ['小美', '柳如烟', '叶凡'];
+  var BOT_NICKS = (function () {
+    var pool = (window.PCNicknames && window.PCNicknames.list) || [];
+    return BOT_NAME_SEEDS.map(function (seed, i) {
+      if (pool.indexOf(seed) !== -1) return seed;
+      return pool.length ? pool[i % pool.length] : ('牌手' + (i + 1));
+    });
+  })();
 
   function create(ctx) {
     var self = {};
@@ -48,7 +58,10 @@ window.PCGameClient = (function () {
     var botThinkMs = 1400;               // slower: give a human a clear window to tap 过牌/出牌 before the bot grabs the turn
     var botWatchdog = null;              // safety net: re-drive a bot if its move never advances the turn
     var BOT_WATCHDOG_MS = 5000;          // > botThinkMs + one E2EE round trip; only fires on a stuck turn
-    var arrangeMode = 0;                 // v24: 0/1 = 两种理牌方案, 2 = 平铺(点数序)
+    /* v25: 4-mode cycle — 0=平铺(点数序,平铺显示) 1=堆叠(同点数纵向叠放)
+     * 2=火力集中(炸弹/同花顺组合) 3=少手数(顺子/连对优先组合). */
+    var ARRANGE_LABELS = ['↔ 平铺', '▤ 堆叠', '🔥 火力', '🀄 少手'];
+    var arrangeMode = -1;                // -1 = 未整理(默认), 首点进入 0=平铺
 
     /* --- Bot behaviour diagnostics ---------------------------------------
      * A separate, timestamped trace of the whole bot driver: scheduling,
@@ -361,7 +374,7 @@ window.PCGameClient = (function () {
       state.lastWinner = null; state._myPassPending = 0;
       state.finishOrder = []; state.log = []; state.played = [];
       state.result = null; state.seatPlays = {}; state.playedBySeat = {};   // fresh round
-      state.arrangeGroups = null; arrangeMode = 0;   // reset 理牌 cycle each deal
+      state.arrangeGroups = null; arrangeMode = -1;   // reset 理牌 cycle each deal (v25: -1→平铺)
       if (msg.partner) state.partnerSid = msg.partner;
       state.botHands = state.botHands || {};
       if (msg.order && msg.order.length === 4) state.players = msg.order.slice();
@@ -1035,35 +1048,37 @@ window.PCGameClient = (function () {
     }
     function requestDeal() { sendGame({ kind: 'deal_request', requestBy: mySid }); }
 
-    /* v24: auto-arrange cycles through 火力集中 / 少手数 / 平铺(点数序).
-     * Only the LOCAL display order changes — card ids and E2EE game data are
-     * untouched. The button label is returned so the UI can show the mode. */
+    /* v25: the 理牌 button cycles 平铺 → 堆叠 → 火力 → 少手 → 平铺…
+     * Only the LOCAL display order changes — card ids and E2EE data are intact.
+     * mode 0 平铺: rank order, cards laid flat (no fan, no combo labels).
+     * mode 1 堆叠: rank order, same-rank cards fanned vertically (default).
+     * mode 2 火力: bomb/flush-first combos, labelled fans.
+     * mode 3 少手: straight/pair-first combos (fewer tricks), labelled fans. */
     function autoArrange() {
       if (!window.PCBots || !window.PCGame) return null;
       var view = state.spectator ? state.targetHand : state.hand;
       if (!view || !view.length) return null;
-      arrangeMode = (arrangeMode + 1) % 3;
-      var arrangement;
-      if (arrangeMode === 2) {
-        // 平铺: plain rank order (strongest first), no grouping.
-        arrangement = (window.PCGame.sortHandForView)
-          ? { order: window.PCGame.sortHandForView(view, state.level), label: '平铺 · 点数序' }
-          : { order: view.slice(), label: '平铺' };
+      arrangeMode = (arrangeMode + 1) % 4;
+      var order, groups = null;
+      var rankOrder = window.PCGame.sortHandForView
+        ? window.PCGame.sortHandForView(view, state.level) : view.slice();
+      if (arrangeMode === 0 || arrangeMode === 1) {
+        order = rankOrder;                       // 平铺 / 堆叠 share point order
       } else {
         var schemes = window.PCBots.arrangeSchemes(view, state.level, window.PCGame);
-        var s = schemes[arrangeMode] || schemes[0];
-        arrangement = { order: s.order, label: s.name };
-        // Record the grouping so the UI can label each combo stack.
-        state.arrangeGroups = s.groups.map(function (g) {
+        var s = schemes[arrangeMode - 2] || schemes[0];
+        order = s.order;
+        groups = s.groups.map(function (g) {
           return { name: g.pattern.name, ids: g.cards.map(function (c) { return c.id; }) };
         });
       }
-      if (arrangeMode === 2) state.arrangeGroups = null;
-      if (state.spectator) state.targetHand = arrangement.order;
-      else state.hand = arrangement.order;
-      note('已' + arrangement.label + '（仅本机显示顺序，牌局数据不变）');
+      state.arrangeGroups = groups;
+      if (state.spectator) state.targetHand = order;
+      else state.hand = order;
+      var label = ARRANGE_LABELS[arrangeMode];
+      note('已切换：' + label.replace(/^\S+\s/, '') + '（仅本机显示，牌局数据不变）');
       onUpdate(state);
-      return { mode: arrangeMode, label: arrangement.label };
+      return { mode: arrangeMode, label: label, spread: arrangeMode === 0 };
     }
 
     self.arrangeMode = function () { return arrangeMode; };

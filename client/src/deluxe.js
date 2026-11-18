@@ -496,18 +496,18 @@ window.PCDeluxe = (function () {
 
   function onPassClick() { game.pass(); }
 
-  /* v24: one button cycles 理牌① 火力集中 → 理牌② 少手数 → 平铺 → back.
-   * The engine performs the reorder and reports the label; the button mirrors
-   * it. `spread` (flat render) is on only for the 平铺 mode. */
+  /* v25: one short-labelled button cycles 平铺 → 堆叠 → 火力 → 少手 → back.
+   * The engine performs the reorder and reports label + spread; the button
+   * mirrors it with a compact label so it keeps a normal (equal-width) size. */
   function onArrangeClick() {
     if (!game) return;
     var r = game.autoArrange && game.autoArrange();
     if (!r) { ctx.toast('暂无可整理的手牌'); return; }
-    spread = (r.mode === 2);
+    spread = !!r.spread;
     var b = $('btn-game-arrange');
     if (b) {
-      b.textContent = r.mode === 2 ? '↔ 平铺' : (r.mode === 0 ? '🀄 理牌① 火力' : '🀄 理牌② 少手');
-      b.title = '当前：' + r.label + ' · 点击循环切换理牌方案';
+      b.textContent = r.label;
+      b.title = '当前：' + r.label.replace(/^\S+\s/, '') + ' · 点击循环：平铺→堆叠→火力→少手';
     }
     renderGame(game.state);
   }

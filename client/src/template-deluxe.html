@@ -19,7 +19,10 @@
     <div class="brand"><span class="dot"></span><span id="gate-room">私密聊天</span> <span class="deluxe-badge">豪华版</span></div>
     <div class="meta-line"><span id="gate-remain">—</span> · <span id="gate-count">—</span></div>
     <label for="nickname">你的昵称</label>
-    <input id="nickname" type="text" maxlength="24" autocomplete="off" placeholder="输入昵称后进入" />
+    <div class="nick-line">
+      <input id="nickname" type="text" maxlength="24" autocomplete="off" placeholder="输入昵称，或随机生成一个" />
+      <button id="btn-random-nick" class="nick-dice" type="button" title="随机生成一个中文昵称">🎲 随机</button>
+    </div>
     <button id="btn-enter" class="primary">进入房间</button>
     <div class="status" id="gate-status"></div>
     <div class="key-note" title="进入时在本机生成密钥对，私钥永不上传服务器">🔒 密钥仅存本机 · 3D / 语音 / 掼蛋全部端到端加密</div>
@@ -64,7 +67,7 @@
     <div class="game-log" id="game-log"></div>
     <div class="my-hand" id="my-hand"></div>
     <div class="game-bottom">
-      <button class="tool-btn" id="btn-game-arrange" title="循环切换理牌方案（炸弹优先 / 手数最少 / 平铺）">🀄 理牌</button>
+      <button class="tool-btn" id="btn-game-arrange" title="点击循环：平铺→堆叠→火力→少手">🀄 理牌</button>
       <button class="tool-btn" id="btn-game-pass">过牌</button>
       <button class="tool-btn" id="btn-game-play">出牌</button>
     </div>
@@ -120,6 +123,9 @@
 </script>
 <script>
 /*__CONFIG__*/
+</script>
+<script>
+/*__NICKNAMES__*/
 </script>
 <script>
 /*__MEMBERS__*/

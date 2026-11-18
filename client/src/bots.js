@@ -102,24 +102,36 @@
         if (have.length === 4) take(have);
       });
     }
+    /* v25: a straight is capped at FIVE cards (user rule). A longer run is
+     * split into consecutive 5-card chunks; a trailing remainder < 5 stays in
+     * the pool for other combos instead of forming an over-long straight. */
+    var MAX_RUN = 5;
     function takeStraightFlushes() {
       ['S', 'H', 'C', 'D'].forEach(function (suit) {
         var sc = pool.filter(function (c) { return c.s === suit && c.r >= 3 && c.r <= 14; });
-        consecutiveRuns(sc.map(function (c) { return c.r; }), 5).forEach(function (run) {
-          var cs = [];
-          run.forEach(function (r) { var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c); });
-          take(cs);
+        consecutiveRuns(sc.map(function (c) { return c.r; }), MAX_RUN).forEach(function (run) {
+          for (var i = 0; i + MAX_RUN <= run.length; i += MAX_RUN) {
+            var cs = [];
+            run.slice(i, i + MAX_RUN).forEach(function (r) {
+              var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c);
+            });
+            take(cs);
+          }
         });
       });
     }
     function takeStraights() {
       var runs = consecutiveRuns(Object.keys(rankCounts(pool)).map(Number).filter(function (r) {
         return r >= 3 && r <= 14;
-      }), 5);
+      }), MAX_RUN);
       runs.forEach(function (run) {
-        var cs = [];
-        run.forEach(function (r) { var c = pickRank(pool, r, 1)[0]; if (c) cs.push(c); });
-        take(cs);
+        for (var i = 0; i + MAX_RUN <= run.length; i += MAX_RUN) {
+          var cs = [];
+          run.slice(i, i + MAX_RUN).forEach(function (r) {
+            var c = pickRank(pool, r, 1)[0]; if (c) cs.push(c);
+          });
+          take(cs);
+        }
       });
     }
     function takeDoubleStraights() {
@@ -140,33 +152,21 @@
         take(cs);
       });
     }
-    function takeTriplePairs() {
-      var guard = 0;
-      while (guard++ < 14) {
-        var c = rankCounts(pool);
-        var trips = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 3 && r <= 15; })
-          .sort(function (a, b) { return a - b; });
-        var pairs = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 2 && r <= 15; })
-          .sort(function (a, b) { return a - b; });
-        var done = false;
-        for (var t = 0; t < trips.length && !done; t++) {
-          for (var p = 0; p < pairs.length; p++) {
-            if (pairs[p] === trips[t]) continue;
-            var three = pickRank(pool, trips[t], 3), two = pickRank(pool, pairs[p], 2);
-            if (three.length === 3 && two.length === 2 && take(three.concat(two))) { done = true; break; }
-          }
-        }
-        if (!done) break;
-      }
-    }
+    /* v25: 三带二 is intentionally NOT fused into a 5-card combo any more —
+     * triples and pairs are laid out separately by takeRest(). */
+
+    /* v25: remainder is laid out as THREE-card groups then PAIRS then singles
+     * — i.e. 三带二 is NOT fused into one 5-card combo. Triples must be taken
+     * BEFORE pairs, otherwise the pair pass eats 2 of a 3-of-a-kind and leaves
+     * a stray single. */
     function takeRest() {
       var cnt = rankCounts(pool);
       Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-        if (cnt[r] >= 2) take(pickRank(pool, r, 2));
+        if (cnt[r] >= 3) take(pickRank(pool, r, 3));
       });
       cnt = rankCounts(pool);
       Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-        if (cnt[r] >= 3) take(pickRank(pool, r, 3));
+        if (cnt[r] >= 2) take(pickRank(pool, r, 2));
       });
       pool.forEach(function (c) { take([c]); });
     }
@@ -177,12 +177,12 @@
     if (bombsFirst) {
       // 火力集中: bombs & straight flushes first, then fold the remainder.
       takeBombs(); takeStraightFlushes(); takeStraights();
-      takeDoubleStraights(); takeTripleStraights(); takeTriplePairs(); takeRest();
+      takeDoubleStraights(); takeTripleStraights(); takeRest();
     } else {
       // 少手数: long runs & straight flushes first to shed many cards with one
       // trick, THEN keep bombs intact. Small cards get absorbed into runs.
       takeStraightFlushes(); takeStraights(); takeDoubleStraights();
-      takeTripleStraights(); takeTriplePairs(); takeBombs(); takeRest();
+      takeTripleStraights(); takeBombs(); takeRest();
     }
     return {
       groups: groups,
