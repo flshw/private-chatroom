@@ -21,6 +21,16 @@ button{border:none;border-radius:10px;padding:11px 16px;font-weight:650;cursor:p
 .primary{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;box-shadow:0 8px 18px rgba(91,140,255,.26)}
 .ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
 button:disabled{opacity:.5;cursor:default}
+/* radio choice cards (client edition) */
+.radio-row{display:flex;gap:10px;margin-top:2px}
+.radio-row label{flex:1;display:flex;gap:9px;align-items:flex-start;margin:0;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:#0e1528;cursor:pointer;font-size:13px;color:var(--ink);transition:border-color .15s,background .15s}
+.radio-row label:hover{border-color:var(--brand)}
+.radio-row label.sel{border-color:var(--brand);background:rgba(91,140,255,.12);box-shadow:0 0 0 1px var(--brand) inset}
+.radio-row input{width:auto;margin:2px 0 0;accent-color:var(--brand);flex:none}
+.radio-row .rt{display:block;font-weight:650;font-size:13px}
+.radio-row .rd{display:block;color:var(--muted);font-size:11px;margin-top:2px;line-height:1.4}
+.name-line{display:flex;gap:8px}.name-line input{flex:1;min-width:0}
+.name-line button{flex:none;padding:11px 14px}
 .msg{font-size:13px;min-height:18px;margin-top:12px}.msg.err{color:var(--danger)}.msg.ok{color:var(--ok)}
 .tabs{display:flex;gap:8px;margin-bottom:18px}.tabs button{flex:1;background:transparent;color:var(--muted);border:1px solid var(--line)}
 .tabs button.active{color:#fff;border-color:var(--brand);background:rgba(91,140,255,.12)}
@@ -76,16 +86,24 @@ button:disabled{opacity:.5;cursor:default}
     <h1><span class="dot"></span>我的房间</h1>
     <p class="sub">已登录：<span id="who"></span> · <a href="#" id="logout" style="color:var(--muted)">登出</a></p>
     <div class="row">
-      <div><label>房间名称</label><input id="r-name" maxlength="40" placeholder="例如：老友群" /></div>
+      <div>
+        <label>房间名称 <span style="color:var(--muted);font-weight:400">（留空将自动生成）</span></label>
+        <div class="name-line"><input id="r-name" maxlength="40" placeholder="例如：老友群（点右侧骰子随机生成）" /><button class="ghost" id="btn-gen-name" title="随机生成一个房间名称">🎲 随机</button></div>
+      </div>
     </div>
     <div class="row">
-      <div><label>生命期</label><select id="r-ttl"><option value="3600">1 小时</option><option value="28800">8 小时</option><option value="43200">12 小时</option><option value="86400" selected>24 小时</option><option value="172800">48 小时</option><option value="259200">72 小时</option></select></div>
+      <div><label>生命期 <span style="color:var(--muted);font-weight:400">（默认 1 小时，自动记住）</span></label><select id="r-ttl"><option value="3600" selected>1 小时</option><option value="28800">8 小时</option><option value="43200">12 小时</option><option value="86400">24 小时</option><option value="172800">48 小时</option><option value="259200">72 小时</option></select></div>
       <div><label>人数上限</label><select id="r-max"><option value="2">2 人</option><option value="4">4 人</option><option value="6" selected>6 人</option><option value="10">10 人</option><option value="20">20 人</option></select></div>
     </div>
-    <div><label>客户端版本</label><select id="r-edition"><option value="lite" selected>简洁版 · 轻量快速</option><option value="deluxe">豪华版 · 3D/全双工语音/视频小窗/联机掼蛋</option></select></div>
+    <div><label>客户端版本 <span style="color:var(--muted);font-weight:400">（自动记住上次选择）</span></label>
+      <div class="radio-row" id="r-edition">
+        <label data-edition="lite"><input type="radio" name="edition" value="lite" checked /><span><span class="rt">简洁版</span><span class="rd">轻量快速 · 文字 / 文件 / 语音包 / 语音通话</span></span></label>
+        <label data-edition="deluxe"><input type="radio" name="edition" value="deluxe" /><span><span class="rt">豪华版</span><span class="rd">3D 牌桌 / 语音通话 / 联机掼蛋</span></span></label>
+      </div>
+    </div>
     <div style="margin-top:18px"><button class="primary" id="btn-apply" style="width:100%">创建房间并下载专属客户端</button></div>
     <div class="msg" id="apply-msg"></div>
-    <p class="hint">创建后自动通过，立即生成一份专属 HTML。简洁版专注文字/文件/语音条；豪华版额外提供 3D 牌桌场景、全双工语音、可拖拽视频小窗与联机掼蛋（含唯一旁观席位）。发给朋友双击打开即可进入。房间到期后所有消息自动销毁。</p>
+    <p class="hint">创建后自动通过，立即生成一份专属 HTML。简洁版专注文字/文件/语音包与语音通话；豪华版额外提供 3D 牌桌场景与联机掼蛋。发给朋友双击打开即可进入。房间到期后所有消息自动销毁。</p>
     <div class="list" id="room-list"></div>
   </div>
 
@@ -109,7 +127,7 @@ button:disabled{opacity:.5;cursor:default}
         <div class="lbl">豪华版</div>
         <div id="qr-deluxe"></div>
         <a class="link" id="qr-deluxe-link" href="#" target="_blank" rel="noopener"></a>
-        <p class="desc">3D 牌桌 / 全双工语音 / 视频小窗 / 联机掼蛋</p>
+        <p class="desc">3D 牌桌 / 语音通话 / 联机掼蛋</p>
       </div>
     </div>
     <div class="qrnote">两个二维码使用同一房间凭证，可多人同时使用。重新下载客户端或销毁房间后，旧二维码立即失效，需要重新生成。二维码相当于房间钥匙，请勿随意公开转发。</div>
@@ -119,6 +137,49 @@ button:disabled{opacity:.5;cursor:default}
 (function(){
   var $=function(id){return document.getElementById(id)};
   var mode='login';
+  /* ---- user preferences: client edition + lifetime (persisted locally) ---- */
+  var PREF_KEY='pc_create_prefs_v1';
+  function loadPrefs(){try{return JSON.parse(localStorage.getItem(PREF_KEY)||'{}')||{}}catch(e){return {}}}
+  function savePrefs(p){try{localStorage.setItem(PREF_KEY,JSON.stringify(p))}catch(e){}}
+  function applyPrefs(){
+    var p=loadPrefs();
+    // edition radio (default lite)
+    var ed=p.edition==='deluxe'?'deluxe':'lite';
+    var radios=document.querySelectorAll('#r-edition input[name=edition]');
+    for(var i=0;i<radios.length;i++){radios[i].checked=(radios[i].value===ed)}
+    syncEditionCards();
+    // lifetime (default 3600 = 1 hour)
+    var ttl=Number(p.ttl);
+    var sel=$('r-ttl');
+    if(ttl&&[3600,28800,43200,86400,172800,259200].indexOf(ttl)!==-1)sel.value=String(ttl);
+  }
+  function currentEdition(){
+    var radios=document.querySelectorAll('#r-edition input[name=edition]:checked');
+    return radios.length?radios[0].value:'lite';
+  }
+  function syncEditionCards(){
+    var labels=document.querySelectorAll('#r-edition label[data-edition]');
+    for(var i=0;i<labels.length;i++)labels[i].classList.toggle('sel',labels[i].getAttribute('data-edition')===currentEdition());
+  }
+  function rememberCreatePrefs(){
+    var p=loadPrefs();p.edition=currentEdition();p.ttl=Number($('r-ttl').value);savePrefs(p);
+  }
+  /* ---- random room name: friendly mnemonic + short numeric suffix ---- */
+  var NAME_A=['深夜','薄荷','星海','微光','旧友','青柠','云边','琥珀','拾光','长风','南巷','初雪','孤岛','暖阳','晚风','秘密','雨林','远山','微醺','薄荷'];
+  var NAME_B=['茶话会','小分队','树洞','闲聊室','根据地','茶座','角落','电台','客厅','聚点','花园','驿站','club','信箱','实验室'];
+  function genRoomName(){
+    var a=NAME_A[Math.floor(Math.random()*NAME_A.length)];
+    var b=NAME_B[Math.floor(Math.random()*NAME_B.length)];
+    var n=String(Math.floor(Math.random()*9000)+1000);
+    return a+b+'·'+n;
+  }
+  $('btn-gen-name').onclick=function(){$('r-name').value=genRoomName();$('r-name').focus()};
+  (function initPrefs(){
+    applyPrefs();
+    var radios=document.querySelectorAll('#r-edition input[name=edition]');
+    for(var i=0;i<radios.length;i++)radios[i].addEventListener('change',function(){syncEditionCards();rememberCreatePrefs()});
+    $('r-ttl').addEventListener('change',rememberCreatePrefs);
+  })();
   function amsg(t,k){var e=$('auth-msg');e.textContent=t||'';e.className='msg'+(k?' '+k:'')}
   function amsgt(t,k){var e=$('apply-msg');e.textContent=t||'';e.className='msg'+(k?' '+k:'')}
   function api(p,o){return fetch('/pc/api'+p,Object.assign({credentials:'same-origin'},o||{})).then(function(r){return r.json().then(function(j){return {status:r.status,body:j}})})}
@@ -217,13 +278,16 @@ button:disabled{opacity:.5;cursor:default}
   }
   loadPublic();setInterval(loadPublic,15000);
   $('btn-apply').onclick=function(){
+    var roomName=$('r-name').value.trim();
+    if(!roomName){roomName=genRoomName();$('r-name').value=roomName}
+    rememberCreatePrefs();
     amsgt('正在创建…');
-    fetch('/pc/api/rooms/apply',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('r-name').value.trim(),ttlSeconds:Number($('r-ttl').value),maxMembers:Number($('r-max').value),edition:$('r-edition').value})})
+    fetch('/pc/api/rooms/apply',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:roomName,ttlSeconds:Number($('r-ttl').value),maxMembers:Number($('r-max').value),edition:currentEdition()})})
     .then(function(r){
       if(r.status!==200){return r.json().then(function(j){amsgt(j.error||'创建失败','err')})}
       var cd=r.headers.get('content-disposition')||'';var mm=cd.match(/filename="([^"]+)"/);var fn=mm?mm[1]:'private-chat.html';
       var cd2=r.headers.get('x-pc-room-id')||'';
-      return r.blob().then(function(b){var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download=fn;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(u)},2000);amsgt('房间已创建，客户端已下载。下面二维码可直接扫码分享。','ok');api('/rooms').then(function(x){if(x.body.ok)loadRooms(x.body.rooms)});if(cd2)showQR(cd2,$('r-name').value.trim()||'新房间')});
+      return r.blob().then(function(b){var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download=fn;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(u)},2000);amsgt('房间已创建，客户端已下载。下面二维码可直接扫码分享。','ok');api('/rooms').then(function(x){if(x.body.ok)loadRooms(x.body.rooms)});if(cd2)showQR(cd2,roomName)});
     }).catch(function(e){amsgt('网络错误：'+e.message,'err')});
   };
 })();

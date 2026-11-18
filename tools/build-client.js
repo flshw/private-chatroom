@@ -56,7 +56,15 @@ const baseMarkers = [
   ['服务端确认seq对齐', 'SEQ-RESYNC'],
   ['历史消息去重', 'state.msgKeys[dkey]'],
   ['历史sid归属', 'state.mySids[env.senderSid]'],
-  ['成员表epoch', 'memberList.epoch != null']
+  ['成员表epoch', 'memberList.epoch != null'],
+  /* v23: full-duplex audio voice (auto-answer) + voice clips, both editions. */
+  ['全双工语音自动接听', 'VOICE-AUTOJOIN'],
+  ['语音glare处理', 'VOICE-GLARE-IGNORE'],
+  ['纯音频无视频', 'video: false'],
+  ['语音包多编码探测', 'audio/webm;codecs=opus'],
+  ['语音包内联播放器', 'voice-clip'],
+  ['语音通话按钮', 'id="btn-voice-live"'],
+  ['视频入口已移除', html => html.indexOf('id="btn-video"') === -1 && html.indexOf('video-overlay') === -1]
 ];
 
 function build(version, parts, markers, outFile) {
@@ -68,8 +76,10 @@ function build(version, parts, markers, outFile) {
     if (html.indexOf(token) === -1) throw new Error(version + ' 模板缺少占位符: ' + token);
     html = html.replace(token, () => inject[key]);
   }
-  for (const [label, marker] of markers) {
-    if (html.indexOf(marker) === -1) throw new Error(version + ' 内联模块缺失: ' + label);
+  for (const entry of markers) {
+    const [label, marker] = entry;
+    const pass = typeof marker === 'function' ? marker(html) : html.indexOf(marker) !== -1;
+    if (!pass) throw new Error(version + ' 内联模块缺失/校验失败: ' + label);
   }
   if (html.indexOf('__PC_CONFIG__') === -1) throw new Error(version + ' 运行期占位符丢失');
   const RUNTIME_GLOBALS = ['__PC_CONFIG__', '__PC_CONFIG_SIG__'];
@@ -207,8 +217,8 @@ const deluxeMarkers = baseMarkers.concat([
   ['移动顶栏两行布局', 'grid-template-areas:"name meta . exit" "game voice mem ."'],
   ['移动手牌可滚到首尾', 'justify-content:safe center'],
   ['移动按钮44px触控', '.game-actions .tool-btn,.game-bottom .tool-btn{min-height:44px'],
-  ['PiP触摸拖拽', 'head.addEventListener(\'pointerdown\', down)'],
-  ['录音状态反馈', 'b.classList.toggle(\'recording\', state === true)'],
+  ['全双工语音状态按钮', 'id="btn-voice-live"'],
+  ['录音状态反馈', 'b.classList.toggle(\'recording\', rec)'],
   ['触摸无粘滞悬停', '@media(hover:hover)'],
   ['输入字号防iOS缩放', '.composer input[type=text]{min-width:88px;padding:10px 11px;font-size:16px}'],
   /* Landscape phone adaptation — short/wide viewport must repack the game
@@ -252,7 +262,7 @@ const deluxeMarkers = baseMarkers.concat([
   ['牌局动态半透明背景', 'background:rgba(10,16,34,.5)'],
   ['牌局动态常显滚动条', 'overflow-y:scroll;overflow-x:hidden'],
   /* v22: 规则完整性 + 状态可靠性 + XSS (deluxe only) */
-  ['昵称XSS修复', "note.textContent = '';"],
+  ['昵称XSS修复', "who.textContent = r.nickname + (r.isMe ? '（我）' : '')"],
   ['进贡规则引擎', 'function applyTribute(hands, finishOrder, teamOf, level)'],
   ['进贡发牌接入', 'window.PCGame.applyTribute(hands'],
   ['进贡首出权', 'msg.tribute.firstSeat'],
@@ -263,9 +273,23 @@ const deluxeMarkers = baseMarkers.concat([
   ['出牌失败回滚', '出牌未送达，已撤销本地出牌'],
   ['过牌失败回滚', '过牌未送达，已撤销本地过牌'],
   ['过牌回显计数', '_myPassPending'],
-  ['房主禁旁观', '房主不能旁观他人'],
   ['名次合法性校验', 'FINISHED-REJECT'],
-  ['重复出牌告警', 'PLAY-SUSPECT']
+  ['重复出牌告警', 'PLAY-SUSPECT'],
+  /* v23: spectator feature removed, video removed, full-duplex voice fixed,
+   * voice-clip player added. These must hold in the built deluxe bundle. */
+  ['旁观入口已移除', html => html.indexOf('btn-spectate') === -1 && html.indexOf('spectate-picker') === -1],
+  ['视频通话已移除', html => html.indexOf('id="btn-video"') === -1 && html.indexOf('video-overlay') === -1 && html.indexOf('pip-video') === -1],
+  ['全双工语音自动接听', 'VOICE-AUTOJOIN'],
+  ['语音glare处理', 'VOICE-GLARE-IGNORE'],
+  ['纯音频轨道', 'video: false'],
+  ['语音包多编码探测', 'audio/webm;codecs=opus'],
+  ['语音包60秒上限', 'MAX_VOICE_MS'],
+  ['语音包播放器', 'voice-clip'],
+  /* v23 rule correctness: 2 weakest when not level; 接风 leads to winner's
+   * partner (opposite seat), never the next player on the right. */
+  ['2牌力规则', 'a plain 2 is the smallest card when not playing 2'],
+  ['接风对家领出', 'leadAfterWinner'],
+  ['接风队友座位', 'state.seats[(i + 2) % 4]']
 ]);
 build('豪华版', deluxeParts, deluxeMarkers, 'client/dist/private-chat-deluxe.template.html');
 

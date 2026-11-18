@@ -222,13 +222,12 @@ const canonical = P.canonicalJSON;
   /* --- 11. Deluxe template + Guandan engine --- */
   const deluxe = fs.readFileSync(path.join(ROOT, 'client/dist/private-chat-deluxe.template.html'), 'utf8');
   ['掼蛋引擎 PCGame', '游戏客户端 PCGameClient', '3D 引擎 PC3D', '豪华版UI PCDeluxe',
-   '旁观按钮 btn-spectate', '游戏面板 game-panel'].forEach(function (pair) {
+   '游戏面板 game-panel'].forEach(function (pair) {
     const marker = Array.isArray(pair) ? pair[1] : ({
       '掼蛋引擎 PCGame': 'root.PCGame = api',
       '游戏客户端 PCGameClient': 'window.PCGameClient = (function',
       '3D 引擎 PC3D': 'window.PC3D = (function',
       '豪华版UI PCDeluxe': 'window.PCDeluxe = (function',
-      '旁观按钮 btn-spectate': 'id="btn-spectate"',
       '游戏面板 game-panel': 'id="game-panel"'
     })[pair];
     check('豪华版已内联 ' + pair, deluxe.indexOf(marker) !== -1);
@@ -241,11 +240,19 @@ const canonical = P.canonicalJSON;
     /PC3D[^\n]*\.init\(\)/.test(deluxe));
   check('游戏初始化判断使用 PCDeluxe.bind（非不存在的 init）',
     deluxe.indexOf('PCDeluxe && window.PCDeluxe.bind') !== -1);
-  // One-to-one consent spectator model guards.
-  check('旁观为一对一同意制（含目标选择与同意答复控制帧）',
-    deluxe.indexOf('GAME_SPECTATE_REPLY') !== -1 &&
-    deluxe.indexOf('spectateCandidates') !== -1 &&
-    deluxe.indexOf('targetSid') !== -1);
+  // v23: spectator + video features removed, full-duplex audio voice present.
+  check('旁观功能已移除（无旁观按钮/选择器/候选接口；协议保留兼容常量）',
+    deluxe.indexOf('id="btn-spectate"') === -1 &&
+    deluxe.indexOf('spectate-picker') === -1 &&
+    deluxe.indexOf('spectateCandidates') === -1 &&
+    deluxe.indexOf('game.replySpectate') === -1);
+  check('视频通话已移除（无视频按钮/画中画/视频遮罩）',
+    deluxe.indexOf('id="btn-video"') === -1 &&
+    deluxe.indexOf('pip-video') === -1 &&
+    deluxe.indexOf('video-overlay') === -1);
+  check('全双工语音自动接听与纯音频约束',
+    deluxe.indexOf('VOICE-AUTOJOIN') !== -1 &&
+    deluxe.indexOf('video: false') !== -1);
   check('手牌选择器已改为 .pcard（不再覆盖登录 .card）',
     deluxe.indexOf('.pcard{width:44px') !== -1 &&
     deluxe.indexOf('.card{width:44px') === -1 &&

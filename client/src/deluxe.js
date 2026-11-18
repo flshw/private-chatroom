@@ -6,7 +6,7 @@
  * and draggable PiP video. The simple edition never loads this file.
  */
 window.PCDeluxe = (function () {
-  var game = null, ctx = null, voiceOn = false, selected = {};
+  var game = null, ctx = null, selected = {};
   var membersList = [], mySid = null, picked = [], setupOpen = false;
   var partnerPick = null;   // sid of chosen 对家 (teammate)
   var spread = false; // false = stacked by rank (default), true = flat
@@ -47,13 +47,9 @@ window.PCDeluxe = (function () {
     if (setupOpen) renderSetup();
   }
 
-  function watcherMap() {
-    var out = {};
-    ((game && game.state.spectate) || []).forEach(function (r) {
-      if (r.status === 'approved') out[r.spectatorSid] = true;
-    });
-    return out;
-  }
+  /* Spectator feature removed (v23): nobody watches anybody. Kept as a no-op
+   * so seat auto-pick logic stays simple and stable. */
+  function watcherMap() { return {}; }
 
   function showSetup(open) {
     setupOpen = !!open;
@@ -192,7 +188,7 @@ window.PCDeluxe = (function () {
     var prevScroll = hand.scrollLeft;
     hand.innerHTML = '';
     if (!shown.length) return;
-    var readonly = !!st.spectator;
+    var readonly = false; // spectator feature removed — everyone plays their own hand
     var ordered = arrangedOrder(shown, st);
     // Group by rank in the arranged order.
     var groups = [], byRank = {};
@@ -278,7 +274,7 @@ window.PCDeluxe = (function () {
       if (counts[c.r] === undefined) { counts[c.r] = 0; order.push(c.r); }
       counts[c.r]++;
     });
-    var known = (st.played || []).concat(st.spectator ? (st.targetHand || []) : (st.hand || []));
+    var known = (st.played || []).concat(st.hand || []);
     known.forEach(function (c) { if (counts[c.r] !== undefined) counts[c.r]--; });
     box.innerHTML = '';
     var title = document.createElement('span');
@@ -348,7 +344,7 @@ window.PCDeluxe = (function () {
     var seats = $('game-seats'), table = $('game-table'), hand = $('my-hand'), log = $('game-log');
     if (!seats || !table || !hand) return;
     if (!$('game-panel') || $('game-panel').classList.contains('hidden')) return;
-    if (st.phase === 'playing' || st.phase === 'dealing' || st.spectator) showSetup(false);
+    if (st.phase === 'playing' || st.phase === 'dealing') showSetup(false);
     renderCounter(st);
     // Seats — each player has a DISTINCT position showing their nickname,
     // remaining card count (highlighted when < 10) and their last play THIS
@@ -412,43 +408,17 @@ window.PCDeluxe = (function () {
         });
       } else {
         var tip = document.createElement('div'); tip.className = 'tip';
-        tip.textContent = st.spectator ? '旁观中 · 等待玩家出牌' : (st.phase === 'idle' ? '点击「开局」开始' : '新一轮 · 请领出');
+        tip.textContent = st.phase === 'idle' ? '点击「开局」开始' : '新一轮 · 请领出';
         table.appendChild(tip);
       }
     }
-    // My hand — observers see the ONE target's hand (read-only), players see own.
-    var shown = st.spectator ? (st.targetHand || []) : (st.hand || []);
+    // My hand
+    var shown = st.hand || [];
     renderHand(hand, shown, st);
-    // Level / turn / spectator note
+    // Level / turn
     var lv = $('game-level'); if (lv) lv.textContent = '打 ' + game.rankName(st.level) + ' · 第 ' + (st.roundNo || 1) + ' 局';
-    var note = $('spectator-note');
-    if (note) {
-      var texts = [];
-      if (st.spectator && st.watchTargetSid) {
-        var tn = (st.seats.filter(function (s) { return s.sid === st.watchTargetSid; })[0] || {}).nickname || '玩家';
-        texts.push('👁 你正在旁观：' + tn + ' 的手牌（只看这一人，不可更改）');
-      }
-      if (st.pendingForMe) {
-        texts.push('🔔 ' + (st.pendingForMe.spectatorNickname || '有人') + ' 请求旁观你的手牌');
-      }
-      // SECURITY: spectatorNickname / tn are user-controlled. Never build this
-      // with innerHTML — a nickname like <svg/onload=...> would become stored
-      // XSS and could read the UK private key from localStorage. Use text nodes.
-      note.textContent = '';
-      if (texts.length) {
-        note.classList.remove('hidden');
-        texts.forEach(function (t, i) {
-          var line = document.createElement('div');
-          if (i) line.style.marginTop = '4px';
-          line.textContent = t;
-          note.appendChild(line);
-        });
-      } else note.classList.add('hidden');
-    }
-    // Consent buttons for a pending request targeting me.
-    renderConsent(st);
-    var myTurn = !st.spectator && st.turn === ctx.state.mySid;
-    var inPlay = st.phase === 'playing' && !st.spectator;
+    var myTurn = st.turn === ctx.state.mySid;
+    var inPlay = st.phase === 'playing';
     var btnPlay = $('btn-game-play'), btnPass = $('btn-game-pass');
     if (btnPlay) btnPlay.disabled = !myTurn;
     // Keep 过牌 clickable for the whole match: a grey button that ignores taps
@@ -459,7 +429,7 @@ window.PCDeluxe = (function () {
       btnPass.classList.toggle('muted', !myTurn || !st.table);
     }
     var btnStart = $('btn-game-start');
-    if (btnStart) btnStart.classList.toggle('hidden', st.phase === 'playing' || st.phase === 'finished' || st.spectator);
+    if (btnStart) btnStart.classList.toggle('hidden', st.phase === 'playing' || st.phase === 'finished');
     if (log) { log.innerHTML = ''; st.log.slice(-12).forEach(function (t) {
       var d = document.createElement('div'); d.textContent = t; log.appendChild(d);
     }); log.scrollTop = log.scrollHeight; }
@@ -477,7 +447,7 @@ window.PCDeluxe = (function () {
     p.classList.toggle('hidden');
     if (opening) {
       syncSeats();
-      if (game && !game.state.spectator && game.state.phase === 'idle') {
+      if (game && game.state.phase === 'idle') {
         autoPick();
         showSetup(true);
       } else {
@@ -502,7 +472,6 @@ window.PCDeluxe = (function () {
 
   function onArrangeClick() {
     if (!game) return;
-    if (game.state.spectator) { ctx.toast('旁观模式不能整理手牌'); return; }
     if (!game.autoArrange || !game.autoArrange()) ctx.toast('暂无可整理的手牌');
     else renderGame(game.state);
   }
@@ -529,127 +498,25 @@ window.PCDeluxe = (function () {
     game.requestStart([mySid].concat(picked), partner);
   }
 
-  /* Choose exactly ONE player to watch. Once locked by the server it cannot
-   * be changed, so show a clear pick-list with a confirm. */
-  function requestSpectate() {
-    if (!game) return;
-    if (game.state.myRelation) {
-      ctx.toast('你已锁定旁观一名玩家，无法更改或旁观其他人');
-      return;
-    }
-    var cands = game.spectateCandidates();
-    if (!cands.length) { ctx.toast('当前没有其他可旁观的玩家'); return; }
-    var box = $('spectate-picker') || (function () {
-      var e = document.createElement('div'); e.id = 'spectate-picker';
-      e.className = 'spectate-picker hidden';
-      document.body.appendChild(e); return e;
-    })();
-    box.innerHTML = '';
-    var title = document.createElement('div'); title.className = 'pk-title';
-    title.textContent = '选择旁观对象（选定后不可更改，需对方同意）';
-    box.appendChild(title);
-    cands.forEach(function (c) {
-      var b = document.createElement('button'); b.className = 'tool-btn';
-      b.textContent = '👁 ' + c.nickname;
-      b.onclick = function () {
-        game.requestSpectate(c.sid);
-        box.classList.add('hidden');
-      };
-      box.appendChild(b);
-    });
-    var cancel = document.createElement('button'); cancel.className = 'tool-btn pk-cancel';
-    cancel.textContent = '取消';
-    cancel.onclick = function () { box.classList.add('hidden'); };
-    box.appendChild(cancel);
-    box.classList.remove('hidden');
-  }
-
-  /* Draw consent buttons when someone asks to watch MY hand. */
-  function renderConsent(st) {
-    var panel = $('game-panel'); if (!panel) return;
-    var box = $('spectate-consent') || (function () {
-      var e = document.createElement('div'); e.id = 'spectate-consent';
-      e.className = 'spectate-consent hidden'; panel.appendChild(e); return e;
-    })();
-    box.innerHTML = '';
-    if (!st.pendingForMe) { box.classList.add('hidden'); return; }
-    box.classList.remove('hidden');
-    var q = document.createElement('div'); q.className = 'ask';
-    q.textContent = '🔔 ' + (st.pendingForMe.spectatorNickname || '有人') + ' 请求旁观你的手牌';
-    box.appendChild(q);
-    var yes = document.createElement('button'); yes.className = 'tool-btn'; yes.textContent = '同意';
-    yes.onclick = function () { game.replySpectate(st.pendingForMe.spectatorSid, true); };
-    var no = document.createElement('button'); no.className = 'tool-btn'; no.textContent = '拒绝';
-    no.onclick = function () { game.replySpectate(st.pendingForMe.spectatorSid, false); };
-    box.appendChild(yes); box.appendChild(no);
-  }
-
   function onGameState(f) { /* public turn/seat state already rendered via game.onUpdate */ }
 
-  function onSpectateState(f) { if (game) game.onMessage({ kind: 'spectate_state', spectate: f.spectate, self: f.self }); }
-
-  /* --- full-duplex live voice: reuse WebRTC mesh, audio-only, always on --- */
+  /* --- full-duplex live voice (audio-only). Auto-answer lives in media.js. --- */
   function toggleVoice() {
-    if (!window.PCMedia || !ctx) return;
-    if (!voiceOn) {
-      // Reuse media module's call machinery but flag live voice in toast.
-      ctx.media.startCall(true);
-      voiceOn = true;
+    if (!window.PCMedia || !ctx || !ctx.media) return;
+    if (!ctx.media.inCall()) {
+      ctx.media.startVoice();
       var b = $('btn-voice-live'); if (b) b.classList.add('on');
-      ctx.toast('全双工语音已开启（可持续对话）');
     } else {
       ctx.media.hangup();
-      voiceOn = false;
       var b2 = $('btn-voice-live'); if (b2) b2.classList.remove('on');
-      ctx.toast('语音已关闭');
+      ctx.toast('语音通话已关闭');
     }
   }
 
-  /* PiP video drag. Uses Pointer Events so the SAME handler works for mouse,
-   * pen and touch — a mouse-only implementation left the small window
-   * completely undraggable on phones, where it covered the play/pass row. */
-  function initPiPDrag() {
-    var box = $('pip-video'), head = $('pip-head');
-    if (!box || !head) return;
-    var dragging = false, ox = 0, oy = 0;
-    function down(e) {
-      // Let the close button work; never start a drag from it.
-      if (e.target && (e.target.id === 'btn-pip-close' || e.target.tagName === 'BUTTON')) return;
-      dragging = true;
-      var r = box.getBoundingClientRect();
-      ox = e.clientX - r.left; oy = e.clientY - r.top;
-      box.style.right = 'auto'; box.style.bottom = 'auto'; box.style.top = r.top + 'px';
-      if (head.setPointerCapture) { try { head.setPointerCapture(e.pointerId); } catch (_) {} }
-      e.preventDefault();
-    }
-    function move(e) {
-      if (!dragging) return;
-      var maxX = Math.max(0, window.innerWidth - box.offsetWidth);
-      var maxY = Math.max(0, window.innerHeight - 56);
-      box.style.left = Math.max(0, Math.min(maxX, e.clientX - ox)) + 'px';
-      box.style.top = Math.max(0, Math.min(maxY, e.clientY - oy)) + 'px';
-      e.preventDefault();
-    }
-    function up() { dragging = false; }
-    head.addEventListener('pointerdown', down);
-    window.addEventListener('pointermove', move, { passive: false });
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
-  }
-
-  /* Video streams: mirror app.js overlay into the PiP body instead of fullscreen. */
-  function pipAddVideo(id, stream, muted) {
-    var body = $('pip-body'); if (!body) return;
-    var empty = $('pip-empty'); if (empty) empty.remove();
-    var old = $(id); if (old) old.remove();
-    var v = document.createElement('video');
-    v.id = id; v.srcObject = stream; v.autoplay = true; v.playsInline = true; v.muted = !!muted;
-    body.appendChild(v);
-    $('pip-video').classList.remove('hidden');
-  }
-  function pipClear() {
-    var body = $('pip-body'); if (body) body.innerHTML = '<div id="pip-empty" class="pip-empty">开启语音/视频后显示画面</div>';
-    if ($('pip-video')) $('pip-video').classList.add('hidden');
+  /* Small status chip in the top bar during a live voice call (no video). */
+  function pipShowStatus(on) {
+    var b = $('btn-voice-live');
+    if (b) { b.classList.toggle('on', !!on); b.textContent = on ? '🎧 通话中' : '🎧 全双工语音'; }
   }
 
   /* ---- Bot diagnostics panel: refresh / copy / download the trace ---- */
@@ -731,7 +598,7 @@ window.PCDeluxe = (function () {
       };
     }
     function down(e) {
-      if (!marqueeOn || !game || game.state.spectator) return;
+      if (!marqueeOn || !game) return;
       // Buttons keep their own click behaviour. Cards are ALLOWED as a drag
       // start: we only begin the marquee past DRAG_TH, so a plain tap still
       // selects that single card via cardEl's own click handler.
@@ -814,7 +681,6 @@ window.PCDeluxe = (function () {
     $('btn-diag-refresh') && $('btn-diag-refresh').addEventListener('click', refreshDiag);
     $('btn-diag-copy') && $('btn-diag-copy').addEventListener('click', copyDiag);
     $('btn-diag-download') && $('btn-diag-download').addEventListener('click', downloadDiag);
-    $('btn-spectate') && $('btn-spectate').addEventListener('click', requestSpectate);
     $('btn-setup-close') && $('btn-setup-close').addEventListener('click', function () { showSetup(false); });
     $('game-setup-mask') && $('game-setup-mask').addEventListener('click', function () { showSetup(false); });
     $('btn-settle-next') && $('btn-settle-next').addEventListener('click', onSettleNext);
@@ -826,16 +692,14 @@ window.PCDeluxe = (function () {
       var b = $('game-settle'); if (b) b.classList.add('hidden'); this.classList.add('hidden');
     });
     $('btn-voice-live') && $('btn-voice-live').addEventListener('click', toggleVoice);
-    $('btn-pip-close') && $('btn-pip-close').addEventListener('click', pipClear);
-    initPiPDrag();
     initMarquee();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
   else wire();
 
   return {
-    bind: bind, onMembers: onMembers, onGameState: onGameState, onSpectateState: onSpectateState, renderGame: renderGame,
-    pipAddVideo: pipAddVideo, pipClear: pipClear,
+    bind: bind, onMembers: onMembers, onGameState: onGameState, renderGame: renderGame,
+    pipShowStatus: pipShowStatus,
     selectCard: function (id) { selected[id] = !selected[id]; },
     _selected: function () { return selected; }
   };

@@ -46,14 +46,19 @@
   function isWild(card, level) { return card.s === 'H' && card.r === level; }
   function isJoker(card) { return card.s === 'W'; }
 
-  /* Ranking value used for comparison. Level card rises above A and 2 but
-   * below jokers; jokers are top. When level===15 (playing 2), 2 is the level
-   * card and thus value 16. */
+  /* Ranking value used for comparison. Level card rises above A and jokers
+   * stay top. Guandan rule for the rank 2:
+   *   - When PLAYING 2 (level===15), 2 IS the level card -> value 16 (handled
+   *     by the r===level branch above), i.e. second only to the jokers.
+   *   - When playing ANY OTHER rank, 2 collapses to the LOWEST card (below 3).
+   *     Returning 2 (nothing else uses r=2) keeps every comparison numeric and
+   *     makes 2-strips/singles/bombs the weakest of their kind.
+   * Jokers: small=16->17, big=17->18, always above the level card. */
   function cmpVal(r, level) {
     if (r === 17) return 18;
     if (r === 16) return 17;
     if (r === level) return 16;
-    if (r === 15) return 15;
+    if (r === 15) return 2; // a plain 2 is the smallest card when not playing 2
     return r; // 3..14
   }
 
@@ -81,7 +86,8 @@
   /* Display / 理牌 order (sortHandForView). Human players read a hand by RANK,
    * strongest first, with same-rank cards kept together — NOT by the bot's
    * "fewest tricks" grouping (which used to push bombs to the front and jokers
-   * to the very end). Order: big joker, small joker, level card/2, then A..3,
+   * to the very end). Order: big joker, small joker, level card, then A..3,
+   * and finally a plain 2 when 2 is NOT the level (Guandan: weakest card).
    * suit tie-break fixed so the sequence is stable across renders. */
   var VIEW_SUIT = { S: 0, H: 1, C: 2, D: 3, W: 4 };
   function sortHandForView(hand, level) {

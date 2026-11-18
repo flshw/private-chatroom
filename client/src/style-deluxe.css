@@ -18,17 +18,8 @@ BASE_STYLES_PLACEHOLDER
 .tool-btn.muted{opacity:.58}
 .tool-btn.on{border-color:var(--ok);color:var(--ok)}
 
-/* Picture-in-picture video: draggable small window. */
-#pip-video{position:fixed;right:18px;bottom:78px;width:260px;z-index:60;
-  background:rgba(10,14,28,.92);border:1px solid var(--line);border-radius:14px;overflow:hidden;
-  box-shadow:var(--shadow);user-select:none}
-#pip-head{padding:7px 10px;font-size:12px;color:var(--muted);cursor:move;display:flex;align-items:center;gap:6px;
-  border-bottom:1px solid var(--line)}
-#pip-head .live{width:8px;height:8px;border-radius:50%;background:var(--danger);box-shadow:0 0 8px var(--danger)}
-#pip-body{max-height:260px;overflow:auto;padding:8px;display:grid;grid-template-columns:1fr 1fr;gap:6px}
-#pip-body video{width:100%;aspect-ratio:4/3;background:#050810;border-radius:8px;object-fit:cover;border:1px solid var(--line)}
-#pip-body video.mini{aspect-ratio:auto;height:0;min-height:0;border:0;padding:0;visibility:hidden}
-#pip-empty{font-size:12px;color:var(--muted);padding:8px;grid-column:1/-1}
+/* Full-duplex voice is audio-only; the top-bar button shows call status
+ * (class "on"). No PiP video window exists in this build. */
 
 /* Voice live indicators. */
 .voice-dot{display:inline-flex;align-items:center;gap:5px;font-size:11px}
@@ -145,17 +136,6 @@ BASE_STYLES_PLACEHOLDER
 .game-log::-webkit-scrollbar-thumb:hover{background:rgba(91,140,255,.85)}
 .game-bottom{display:flex;gap:10px;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
 .game-bottom .tool-btn{min-width:92px;text-align:center}
-.spectator-note{font-size:12px;color:#ffcf7a;border:1px solid #6b5326;background:rgba(107,83,38,.15);border-radius:8px;padding:6px 10px}
-/* One-to-one spectator: consent box + target picker. */
-.spectate-consent{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0;padding:8px 10px;
-  border:1px solid var(--brand2);border-radius:10px;background:rgba(91,140,255,.1)}
-.spectate-consent.hidden,.spectate-picker.hidden{display:none}
-.spectate-consent .ask{flex:1;font-size:12px;color:#c9bdff}
-.spectate-picker{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:90;
-  display:flex;flex-direction:column;gap:8px;min-width:240px;max-width:90vw;padding:16px;
-  background:linear-gradient(160deg,#1b2440,#141a30);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
-.spectate-picker .pk-title{font-size:13px;color:var(--muted);margin-bottom:4px}
-.spectate-picker .pk-cancel{margin-top:4px;color:var(--muted)}
 
 /* ---------- Mobile / touch adaptation (deluxe only, <=720px) ---------- */
 @media(max-width:720px){
@@ -185,11 +165,6 @@ BASE_STYLES_PLACEHOLDER
   .composer .icon{padding:8px 7px;font-size:12px;min-width:32px;min-height:40px}
   .composer input[type=text]{min-width:88px;padding:10px 11px;font-size:16px}
   #btn-send{min-width:60px;padding:10px 12px}
-
-  /* PiP: shrink and park at top-right so it never covers the pass/play row.
-   * touch-action:none on the grab handle lets pointer events drag it. */
-  #pip-video{width:150px;right:8px;bottom:auto;top:110px}
-  #pip-head{touch-action:none}
 
   /* Game HUD follows the taller toolbar; leave room for the composer. On a
    * small screen the translucent HUD lets chat text bleed through and collide
@@ -263,10 +238,6 @@ BASE_STYLES_PLACEHOLDER
   .composer input[type=text]{font-size:16px;padding:8px 10px}
   #btn-send{min-height:44px}
 
-  /* PiP video parks top-right (draggable); never on the button row. */
-  #pip-video{width:160px;right:8px;bottom:auto;top:60px}
-  #pip-head{touch-action:none}
-
   /* The whole game panel becomes a short, two-column grid. */
   #game-panel{inset:58px 0 50px 0;padding:5px 10px;gap:4px;
     display:grid;overflow:hidden;
@@ -289,8 +260,6 @@ BASE_STYLES_PLACEHOLDER
 
   /* Title row is redundant with the toolbar's 掼蛋 button on a short screen. */
   .game-top{display:none}
-  #spectator-note{position:absolute;top:2px;left:10px;right:10px;z-index:10;
-    grid-column:auto;padding:4px 8px;font-size:11px}
 
   .game-seats{grid-area:seats;grid-template-columns:repeat(4,1fr);gap:5px;margin:0;min-height:0}
   .seat{padding:3px 4px;font-size:11px}
@@ -328,7 +297,7 @@ BASE_STYLES_PLACEHOLDER
     font-size:12px;padding:6px 10px;flex:1 1 0}
 
   /* Modals must fit the short height. */
-  #game-setup,.spectate-picker{padding:12px;gap:8px;max-height:92vh;overflow:auto}
+  #game-setup{padding:12px;gap:8px;max-height:92vh;overflow:auto}
   #game-settle{padding:10px 12px;gap:6px;max-height:94vh;overflow:auto}
   .settle-row{padding:5px 9px;font-size:12px}
   .settle-title{font-size:15px}

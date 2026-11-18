@@ -21,7 +21,6 @@
     <label for="nickname">你的昵称</label>
     <input id="nickname" type="text" maxlength="24" autocomplete="off" placeholder="输入昵称后进入" />
     <button id="btn-enter" class="primary">进入房间</button>
-    <button id="btn-spectate" class="tool-btn" style="width:100%;margin-top:8px">👁 申请唯一旁观席位</button>
     <div class="status" id="gate-status"></div>
     <div class="key-note" title="进入时在本机生成密钥对，私钥永不上传服务器">🔒 密钥仅存本机 · 3D / 语音 / 掼蛋全部端到端加密</div>
   </div>
@@ -46,8 +45,7 @@
   </div>
   <footer class="composer">
     <button class="icon" id="btn-attach" title="发送文件（端到端加密）">📎</button>
-    <button class="icon" id="btn-voice" title="录制语音条（端到端加密）">🎤</button>
-    <button class="icon" id="btn-video" title="房间内视频通话（P2P 加密）">📹</button>
+    <button class="icon" id="btn-voice" title="录制语音包（端到端加密，最长 60 秒）">🎤</button>
     <button class="icon" id="btn-export" title="导出聊天记录">导出</button>
     <input id="input" type="text" placeholder="输入消息，Enter 发送" autocomplete="off" />
     <button id="btn-send" class="primary">发送</button>
@@ -61,7 +59,6 @@
       <span class="level" id="game-level">打 2</span>
       <span class="spacer"></span>
     </div>
-    <div id="spectator-note" class="spectator-note hidden"></div>
     <div class="game-seats" id="game-seats"></div>
     <div class="game-table" id="game-table"><div class="tip">点击「掼蛋」选择玩家后开局</div></div>
     <div class="my-hand" id="my-hand"></div>
@@ -111,16 +108,6 @@
       <button class="tool-btn" id="btn-settle-close">关闭</button>
     </div>
   </div>
-</div>
-
-<div id="video-overlay" class="hidden">
-  <div id="video-grid"></div>
-  <button id="btn-hangup" class="danger">挂断</button>
-</div>
-
-<div id="pip-video" class="hidden">
-  <div id="pip-head"><span class="live"></span>实时画面 <span style="flex:1"></span><button id="btn-pip-close" class="danger" style="padding:2px 8px;font-size:11px">关闭</button></div>
-  <div id="pip-body"><div id="pip-empty" class="pip-empty">开启语音/视频后显示画面</div></div>
 </div>
 
 <div id="toast" class="toast hidden"></div>

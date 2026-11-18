@@ -184,7 +184,6 @@
       state.seq = 0;
       saveNickname($('nickname').value.trim());
       enterChat(prevSid);
-      if (game && f.spectate) game.onMessage({ kind: 'spectate_state', spectate: f.spectate });
       // Render history (ciphertext) that this member can decrypt. On a WSS
       // reconnect we keep the live in-memory match (sid already migrated), so
       // replaying historical game frames would rewind phase/turn and re-inject
@@ -203,8 +202,7 @@
     } else if (f.type === PCProtocol.MSG.GAME_STATE) {
       if (window.PCDeluxe && window.PCDeluxe.onGameState) window.PCDeluxe.onGameState(f);
     } else if (f.type === PCProtocol.MSG.GAME_SPECTATE_STATE) {
-      if (game) game.onMessage({ kind: 'spectate_state', spectate: f.spectate, self: f.self });
-      if (window.PCDeluxe && window.PCDeluxe.onSpectateState) window.PCDeluxe.onSpectateState(f);
+      // Spectator feature removed (v23): ignore legacy spectate state frames.
     } else if (f.type === PCProtocol.MSG.ROOM_EXPIRED) {
       handleExpiry();
     } else if (f.type === PCProtocol.MSG.ERROR) {
@@ -327,13 +325,43 @@
       try {
         var meta = JSON.parse(text);
         body.className = 'file';
-        var a = document.createElement('a');
-        a.href = '#'; a.textContent = '📎 ' + (meta.name || '文件');
-        a.onclick = function (e) {
-          e.preventDefault();
-          if (media) media.receiveFile(meta).catch(function (err) { toast('下载失败：' + err.message); });
-        };
-        body.appendChild(a);
+        if (meta.voice) {
+          // Encrypted voice clip: inline player with duration, decrypted lazily.
+          body.classList.add('voice-clip');
+          var vbtn = document.createElement('button');
+          vbtn.className = 'voice-play';
+          vbtn.textContent = '▶';
+          var vinfo = document.createElement('span');
+          vinfo.className = 'voice-info';
+          vinfo.textContent = '🎤 语音 · ' + (meta.duration || '?') + '″';
+          var vau = document.createElement('audio');
+          vau.preload = 'none';
+          vau.style.display = 'none';
+          var loaded = false;
+          vbtn.onclick = function () {
+            if (!loaded) {
+              vbtn.textContent = '…';
+              if (media) media.receiveFileBlob(meta).then(function (rec) {
+                vau.src = rec.url; loaded = true;
+                setTimeout(function () { URL.revokeObjectURL(rec.url); }, 3600000);
+                vau.play(); vbtn.textContent = '⏸';
+              }).catch(function (err) { toast('语音加载失败：' + err.message); vbtn.textContent = '▶'; });
+              return;
+            }
+            if (vau.paused) { vau.play(); vbtn.textContent = '⏸'; }
+            else { vau.pause(); vbtn.textContent = '▶'; }
+          };
+          vau.onended = function () { vbtn.textContent = '▶'; };
+          body.appendChild(vbtn); body.appendChild(vinfo); body.appendChild(vau);
+        } else {
+          var a = document.createElement('a');
+          a.href = '#'; a.textContent = '📎 ' + (meta.name || '文件');
+          a.onclick = function (e) {
+            e.preventDefault();
+            if (media) media.receiveFile(meta).catch(function (err) { toast('下载失败：' + err.message); });
+          };
+          body.appendChild(a);
+        }
       } catch (e) { body.textContent = '[文件消息解析失败]'; }
     } else {
       body.textContent = text;
@@ -447,17 +475,30 @@
       members: PCMembers,
       toast: toast,
       sendKind: sendKind,
+      diag: function (tag, detail) {
+        if (game && typeof game.noteDiag === 'function') {
+          game.noteDiag(tag + (detail ? ' | ' + detail : ''));
+        }
+      },
       onRemoteTrack: onRemoteTrack,
       onLocalStream: onLocalStream,
       onCallEnd: onCallEnd,
-      /* Mic button gives immediate, unmistakable feedback: pending (dimmed),
-       * recording (red pulse + label), or idle. Previously a tap looked dead. */
+      onVoiceState: function (on) {
+        var b = $('btn-voice-live'); if (b) b.classList.toggle('on', !!on);
+      },
+      /* Mic gives immediate, unmistakable feedback: pending (dimmed),
+       * recording (red pulse + elapsed seconds), or idle. */
       onRecordState: function (state) {
         var b = $('btn-voice'); if (!b) return;
-        b.classList.toggle('recording', state === true);
+        var rec = state === true || (typeof state === 'string' && state.indexOf('tick:') === 0);
+        b.classList.toggle('recording', rec);
         b.classList.toggle('rec-pending', state === 'pending');
-        b.textContent = state === true ? '⏹' : '🎤';
-        b.title = state === true ? '点击结束录音并加密发送' : '录制语音条（端到端加密）';
+        if (typeof state === 'string' && state.indexOf('tick:') === 0) {
+          b.textContent = state.slice(5) + '″';
+        } else {
+          b.textContent = state === true ? '⏹' : '🎤';
+        }
+        b.title = rec ? '点击结束录音并加密发送' : '录制语音包（端到端加密，最长 60 秒）';
       }
     });
     // Deluxe edition: initialise Guandan engine + UI. Simple edition is a no-op.
@@ -508,7 +549,6 @@
     state.expired = false;
     if (countdown) { clearInterval(countdown); countdown = null; }
     if (media) { try { if (media.inCall()) media.hangup(); } catch (e) {} media = null; }
-    if (window.PCDeluxe && window.PCDeluxe.pipClear) window.PCDeluxe.pipClear();
     if (net) { net.close(); net = null; }
     game = null;
     chatReady = false;
@@ -524,27 +564,40 @@
     $('nickname').focus();
   }
 
-  function isDeluxe() { return !!(window.PCDeluxe && window.PCDeluxe.pipAddVideo); }
+  function isDeluxe() { return !!(window.PCDeluxe && window.PCDeluxe.renderGame); }
+  /* Live voice is audio-only: local mic is never played back (echo), remote
+   * streams are attached to hidden <audio> elements so they are heard without
+   * any video surface. Deluxe keeps a small call-status chip in the top bar. */
+  function ensureAudioHost() {
+    var host = $('voice-audio-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'voice-audio-host';
+      host.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none';
+      document.body.appendChild(host);
+    }
+    return host;
+  }
   function onLocalStream(stream) {
-    if (isDeluxe()) { window.PCDeluxe.pipAddVideo('video-local', stream, true); return; }
-    var grid = $('video-grid');
-    grid.innerHTML = '';
-    var v = document.createElement('video');
-    v.srcObject = stream; v.autoplay = true; v.muted = true; v.playsInline = true;
-    grid.appendChild(v);
-    $('video-overlay').classList.remove('hidden');
+    // Intentionally no playback for the local stream (avoid mic echo).
+    if (isDeluxe() && window.PCDeluxe.pipShowStatus) window.PCDeluxe.pipShowStatus(true);
   }
   function onRemoteTrack(sid, stream) {
-    if (isDeluxe()) { window.PCDeluxe.pipAddVideo('video-' + sid, stream, false); return; }
-    var grid = $('video-grid');
-    var v = document.createElement('video');
-    v.id = 'video-' + sid; v.srcObject = stream; v.autoplay = true; v.playsInline = true;
-    grid.appendChild(v);
-    $('video-overlay').classList.remove('hidden');
+    var host = ensureAudioHost();
+    var old = host.querySelector('audio[data-sid="' + sid + '"]');
+    if (old) old.remove();
+    var a = document.createElement('audio');
+    a.setAttribute('data-sid', sid);
+    a.srcObject = stream;
+    a.autoplay = true;
+    a.playsInline = true;
+    host.appendChild(a);
+    var play = a.play(); if (play && play.catch) play.catch(function () {});
+    if (isDeluxe() && window.PCDeluxe.pipShowStatus) window.PCDeluxe.pipShowStatus(true);
   }
   function onCallEnd() {
-    if (isDeluxe()) { window.PCDeluxe.pipClear(); return; }
-    $('video-overlay').classList.add('hidden'); $('video-grid').innerHTML = '';
+    var host = $('voice-audio-host'); if (host) host.innerHTML = '';
+    if (isDeluxe() && window.PCDeluxe.pipShowStatus) window.PCDeluxe.pipShowStatus(false);
   }
 
   /* --- wire events --- */
@@ -561,8 +614,16 @@
     e.target.value = '';
   });
   $('btn-voice').addEventListener('click', function () { if (media) media.recordVoice(); });
-  $('btn-video').addEventListener('click', function () { if (media) media.startCall(); });
-  $('btn-hangup').addEventListener('click', function () { if (media) media.hangup(); });
+  /* Live-voice toggle. Deluxe binds its own richer toggle (with state chip);
+   * for the simple edition this generic handler drives the same media API. */
+  (function bindLiveVoice() {
+    var b = $('btn-voice-live'); if (!b) return;
+    b.addEventListener('click', function () {
+      if (!media) return;
+      if (media.inCall()) { media.hangup(); toast('语音通话已关闭'); }
+      else { media.startVoice(); }
+    });
+  })();
   $('btn-exit').addEventListener('click', leaveRoom);
 
   boot();

@@ -149,6 +149,20 @@ window.PCGameClient = (function () {
       }
       return null;
     }
+
+    /* Guandan "接风" (lead hand-off): when the player who took the last trick
+     * has emptied their hand, the NEXT lead does NOT go to the player on their
+     * right — it passes to their PARTNER (the seat directly opposite, i+2),
+     * provided the partner still has cards. Only if the partner has also
+     * finished do we fall back to the next active seat. Team is seat parity
+     * (0&2 vs 1&3), so the partner is always (seat+2)%4. */
+    function leadAfterWinner(winnerSid) {
+      var i = seatOfSid(winnerSid);
+      if (i < 0 || state.seats.length !== 4) return nextActiveSid(winnerSid);
+      var partner = state.seats[(i + 2) % 4];
+      if (partner && state.finishOrder.indexOf(partner.sid) === -1) return partner.sid;
+      return nextActiveSid(winnerSid); // partner finished too -> next active seat
+    }
     function note(text) { state.log.push(text); if (state.log.length > 40) state.log.shift(); onUpdate(state); }
 
     /* Verified humans plus locally-injected bots. Bots fill the table up to
@@ -506,20 +520,15 @@ window.PCGameClient = (function () {
         state.table = null; state.tablePattern = null; state.passes = 0;
         state.seatPlays = {};   // new trick: clear each seat's displayed play
         var leadSid = state.lastWinner || by;
-        // If that winner has already emptied their hand (finished), the lead
-        // would land on a cardless seat and freeze the game. Hand it to the
-        // next player still in the game instead.
+        // If that winner has already emptied their hand, GUANDAN "接风" gives
+        // the lead to their PARTNER (opposite seat), not the next player on the
+        // right. leadAfterWinner handles the partner-finished fallback.
         if (state.finishOrder.indexOf(leadSid) !== -1) {
-          leadSid = nextActiveSid(leadSid) || by;
+          leadSid = leadAfterWinner(leadSid) || by;
+          try { note('对家接风 · 由 ' + ((state.seats[seatOfSid(leadSid)] || {}).nickname || '玩家') + ' 领出'); } catch (e) {}
+        } else {
+          try {         note('新一轮，由 ' + ((state.seats[seatOfSid(leadSid)] || {}).nickname || '玩家') + ' 领出'); } catch (e) {}
         }
-        // A finished/cardless leader can still deadlock here (e.g. its finish
-        // echo lost). Fall back to the next active seat so a bot always leads.
-        if (state.finishOrder.indexOf(leadSid) !== -1 ||
-            !state.botHands ||
-            (isBotSid(leadSid) && !(state.botHands[leadSid] || []).length)) {
-          leadSid = nextActiveSid(leadSid) || leadSid;
-        }
-        try {         note('新一轮，由 ' + ((state.seats[seatOfSid(leadSid)] || {}).nickname || '玩家') + ' 领出'); } catch (e) {}
         dlog('NEW-TRICK', 'lead=' + leadSid + ' (lastWinner=' + state.lastWinner + ')');
         state.turn = leadSid;
       } else {
@@ -997,64 +1006,13 @@ window.PCGameClient = (function () {
           if (msg.players && !setPlayers(msg.players, msg.partnerSid)) { toast('所选玩家已离线，请重新选择'); break; }
           if (isHost()) startMatch();
           break;
-        case 'spectate_state': applySpectateState(msg); break;
+        case 'spectate_state': /* v23: spectator feature removed — ignore */ break;
         default: break;
       }
     }
 
-    /* Public relations + my own relation from the authoritative server. */
-    function applySpectateState(msg) {
-      state.spectate = msg.spectate || [];
-      state.myRelation = msg.self || null;
-      // My identity as observer: approved => I watch; pending => not yet.
-      var mine = null, pendingTarget = null;
-      for (var i = 0; i < state.spectate.length; i++) {
-        var r = state.spectate[i];
-        if (state.myRelation && r.spectatorSid === state.myRelation.spectatorSid) mine = r;
-        if (r.targetSid === mySid && r.status === 'pending') pendingTarget = r;
-      }
-      // Never let the host enter spectator mode: isHost() would go false and
-      // freeze the local bot driver. Server relations stay authoritative; we
-      // simply don't render the host as an observer.
-      if (mine && mine.status === 'approved' && state.hostSid === mySid) {
-        mine = null;
-      }
-      if (mine && mine.status === 'approved') {
-        state.spectator = true;
-        state.watchTargetSid = mine.targetSid;
-      } else {
-        state.spectator = false;
-        state.watchTargetSid = null;
-        state.targetHand = [];
-      }
-      state.pendingForMe = pendingTarget;
-      syncSeats();
-      onUpdate(state);
-    }
-
-    /* Observer requests to watch exactly one target (server enforces lock). */
-    function requestSpectate(targetSid) {
-      // The host owns dealing + the local bot driver. Letting the host become
-      // an observer would make isHost() false and freeze all bots forever.
-      if (isHost()) { toast('房主不能旁观他人（需主持牌局）'); return; }
-      if (state.spectator || state.myRelation) {
-        toast('你已锁定旁观一名玩家，无法更改或旁观其他人');
-        return;
-      }
-      if (!targetSid || targetSid === mySid) { toast('请选择一名其他玩家'); return; }
-      sendControl({ type: P.MSG.GAME_SPECTATE, gameId: 'main', targetSid: targetSid });
-      toast('已提交旁观申请，等待对方同意');
-    }
-
-    /* The watched target answers a pending request. */
-    function replySpectate(spectatorSid, accept) {
-      if (!state.pendingForMe || state.pendingForMe.spectatorSid !== spectatorSid) {
-        toast('没有待处理的旁观申请'); return;
-      }
-      sendControl({ type: P.MSG.GAME_SPECTATE_REPLY, gameId: 'main',
-        spectatorSid: spectatorSid, accept: !!accept });
-    }
-
+    /* v23: spectator feature removed. Server-side relations are no longer
+     * consumed by the client; state.spectator stays false for every player. */
     async function startMatch() {
       if (!isHost()) { toast('只有房主可以开局'); return; }
       if (state.spectator) { toast('旁观者不能开局'); return; }
@@ -1098,15 +1056,6 @@ window.PCGameClient = (function () {
     self.autoArrange = autoArrange;
     self.play = play;
     self.pass = pass;
-    self.requestSpectate = requestSpectate;
-    self.replySpectate = replySpectate;
-    self.spectateCandidates = function () {
-      var watched = {};
-      for (var i = 0; i < state.spectate.length; i++) watched[state.spectate[i].targetSid] = true;
-      return members.all().filter(function (m) {
-        return m.sid !== mySid && !watched[m.sid];
-      }).map(function (m) { return { sid: m.sid, nickname: m.nickname }; });
-    };
     self.targetNickname = function (sid) {
       var s = state.seats.filter(function (x) { return x.sid === sid; })[0];
       return s ? s.nickname : '玩家';
