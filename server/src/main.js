@@ -51,7 +51,7 @@ async function boot() {
   const accounts = new Accounts(db, logger);
   const issuer = new Issuer(db, keys, P.canonicalJSON, logger);
   const hub = new Hub({ db, keys, canonicalJSON: P.canonicalJSON, logger, connLog, serverSecret: keys.serverSecret() });
-  const shares = new Shares(db, logger);
+  const shares = new Shares(db, logger, keys);
   const rooms = new Rooms(db, keys, issuer, accounts, hub, logger);
   rooms.shares = shares;
   hub.rooms = rooms;

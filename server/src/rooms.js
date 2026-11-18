@@ -101,7 +101,7 @@ class Rooms {
     if (!room || room.owner_id !== userId) throw Object.assign(new Error('房间不存在'), { status: 404 });
     if (!this.shares) return { lite: null, deluxe: null };
     const out = { lite: null, deluxe: null };
-    this.db.sharesByRoom(roomId).forEach(row => {
+    this.shares.codesByRoom(roomId).forEach(row => {
       out[row.edition] = config.publicPrefix + '/s/' + row.code;
     });
     return out;
@@ -149,6 +149,9 @@ class Rooms {
     this.db.revokeRoom(roomId, Date.now());
     if (this.shares) this.shares.revoke(roomId);
     this.keys.deleteRoomKey(roomId, room.room_priv_ref);
+    // Purge ciphertext immediately — a revoked room must not keep old
+    // messages/files forever (they were never touched by the expiry sweeper).
+    this.db.purgeRoomContent(roomId);
     if (this.hub) this.hub.kickAll(roomId, 'revoked');
     this.db.audit('room_revoked', roomId, Date.now());
     return { ok: true };

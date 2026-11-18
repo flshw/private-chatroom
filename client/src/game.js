@@ -230,6 +230,74 @@
   }
 
   /* --- tribute / level progression helpers --- */
+  /* Apply 进贡/还贡/抗贡 to freshly dealt hands. All four hands are known here
+   * because the HOST deals locally (bots are local too). Returns transformed
+   * hands plus a human-readable event list and the seat that leads the trick.
+   *   hands:       [ [card,...] x4 ]  (seat order)
+   *   finishOrder: seat indices from LAST round, first-out .. last-out
+   *   teamOf:      [0,1,0,1]
+   *   level:       current rank (for sizing cards)
+   * Cards are objects {s,r,id}; comparison uses cmpVal with the level. */
+  function applyTribute(hands, finishOrder, teamOf, level) {
+    var copy = hands.map(function (h) { return h.slice(); });
+    var events = [];
+    if (!finishOrder || finishOrder.length < 4 || !teamOf) {
+      return { hands: copy, events: events, resisted: false, firstSeat: 0 };
+    }
+    var first = finishOrder[0], second = finishOrder[1];
+    var third = finishOrder[2], fourth = finishOrder[3];
+    var double = teamOf[first] === teamOf[second]; // 双下
+    var losers = double ? [third, fourth] : [fourth];
+    var winners = double ? [first, second] : [first];
+
+    // 抗贡: the losing side holding both big jokers cancels ALL tribute.
+    var bigJokers = 0;
+    losers.forEach(function (seat) {
+      copy[seat].forEach(function (c) { if (c.r === 17) bigJokers++; });
+    });
+    if (bigJokers >= 2) {
+      return { hands: copy, events: [{ action: 'resist', seats: losers }],
+        resisted: true, firstSeat: first };
+    }
+
+    function cardValue(c) {
+      if (c.r === 17) return 1000;   // big joker highest
+      if (c.r === 16) return 999;    // small joker
+      return cmpVal(c.r, level);
+    }
+    function takeMax(seat) {
+      var h = copy[seat]; if (!h.length) return null;
+      var bi = 0;
+      for (var i = 1; i < h.length; i++) if (cardValue(h[i]) > cardValue(h[bi])) bi = i;
+      return h.splice(bi, 1)[0];
+    }
+    function takeMin(seat) {
+      var h = copy[seat]; if (!h.length) return null;
+      var bi = 0;
+      for (var i = 1; i < h.length; i++) if (cardValue(h[i]) < cardValue(h[bi])) bi = i;
+      return h.splice(bi, 1)[0];
+    }
+
+    // pair each loser -> a winner: in a double, lowest loser pays top winner,
+    // second-lowest pays second winner; single: 大拉 pays 大科.
+    for (var i = 0; i < losers.length; i++) {
+      var from = losers[i], to = winners[i];
+      var tribute = takeMax(from);
+      if (!tribute) continue;
+      copy[to].push(tribute);
+      events.push({ action: 'tribute', from: from, to: to, card: tribute });
+      var back = takeMin(to);         // 还贡: winner returns its smallest card
+      if (back) {
+        copy[from].push(back);
+        events.push({ action: 'return', from: to, to: from, card: back });
+      }
+    }
+    // Lead: double-down the side that paid tribute leads (loser with the
+    // highest remaining single); single-down the 大科 (winner) leads.
+    var firstSeat = double ? fourth : first;
+    return { hands: copy, events: events, resisted: false, firstSeat: firstSeat };
+  }
+
   /* finishOrder: array of seat indices in finish order (first out .. last).
    * teamOf: [0,1,0,1] for seats 0/2 vs 1/3. Returns level delta for winners. */
   function levelDelta(finishOrder, teamOf) {
@@ -256,6 +324,7 @@
     makeDeck: makeDeck, isWild: isWild, isJoker: isJoker, cmpVal: cmpVal,
     shuffle: shuffle, deal: deal, sortHand: sortHand, sortHandForView: sortHandForView,
     classify: classify, classifyNormal: classifyNormal, beats: beats, canBeat: canBeat,
-    levelDelta: levelDelta, isDoubleDown: isDoubleDown, canResist: canResist
+    levelDelta: levelDelta, isDoubleDown: isDoubleDown, canResist: canResist,
+    applyTribute: applyTribute
   };
 });

@@ -166,7 +166,7 @@ function createHttpServer(options) {
     if (pathname === API + '/auth/login' && req.method === 'POST') {
       try {
         const b = await readJson(req);
-        const ip = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString().split(',')[0].trim();
+        const ip = clientIp(req);
         const sess = accounts.login(ip, b.username, b.password);
         // HttpOnly + SameSite=Lax cookie; Secure only when served over HTTPS.
         const secure = config.tlsCert ? '; Secure' : '';
@@ -214,6 +214,14 @@ function createHttpServer(options) {
     let m;
     m = pathname.match(new RegExp('^' + API + '/rooms/([A-Za-z0-9_]+)/client$'));
     if (m && req.method === 'GET') {
+      // Reissue is a state-changing GET (rotates joinToken + kicks members).
+      // Block cross-site navigation/top-level fetches using the browser's
+      // Sec-Fetch-Site header when present — a low-friction CSRF mitigation
+      // that keeps the <a download> flow working for same-site portals.
+      const fsSite = req.headers['sec-fetch-site'];
+      if (fsSite && fsSite !== 'same-origin' && fsSite !== 'same-site') {
+        return sendJson(res, 403, { ok: false, error: '拒绝跨站重签发请求' });
+      }
       const user = requireUser();
       if (!user) return sendJson(res, 401, { ok: false, error: '需要登录' });
       try {
@@ -284,7 +292,9 @@ function createHttpServer(options) {
 
     /* ---- admin (reserved; no approval queue by design) ---- */
     if (pathname === API + '/admin/rooms' && req.method === 'GET') {
-      const token = req.headers['x-pc-admin-token'] || url.searchParams.get('adminToken') || '';
+      // SECURITY: admin token must travel in a header only — a URL query would
+      // leak it into browser history, Referer and reverse-proxy access logs.
+      const token = req.headers['x-pc-admin-token'] || '';
       if (!token || token !== (process.env.PC_ADMIN_TOKEN || '')) {
         return sendJson(res, 403, { ok: false, error: '无权操作' });
       }
@@ -298,7 +308,9 @@ function createHttpServer(options) {
     m = pathname.match(new RegExp('^' + API + '/admin/rooms/([A-Za-z0-9_]+)/destroy$'));
     if (m && req.method === 'POST') {
       // Controlled by an admin token header; local-only in v0.1 deployment.
-      const token = req.headers['x-pc-admin-token'] || url.searchParams.get('adminToken') || '';
+      // SECURITY: admin token must travel in a header only — a URL query would
+      // leak it into browser history, Referer and reverse-proxy access logs.
+      const token = req.headers['x-pc-admin-token'] || '';
       if (!token || token !== (process.env.PC_ADMIN_TOKEN || '')) {
         return sendJson(res, 403, { ok: false, error: '无权操作' });
       }
@@ -309,7 +321,16 @@ function createHttpServer(options) {
   });
 
   const wss = new WebSocketServer({ server, path: config.wsPath, maxPayload: P.LIMITS.MAX_FRAME_BYTES });
+  const MAX_WS_CONNECTIONS = (typeof config.maxWsConnections === 'number' && config.maxWsConnections > 0)
+    ? config.maxWsConnections : 200;
   wss.on('connection', ws => {
+    // Bound total sockets: an unauthenticated attacker could otherwise open
+    // unlimited connections (no JOIN needed) and exhaust memory/FDs.
+    if (wss.clients.size > MAX_WS_CONNECTIONS) {
+      trace('WS-REJECT limit=' + MAX_WS_CONNECTIONS + ' size=' + wss.clients.size);
+      try { ws.close(1013, 'server busy'); } catch (e) {}
+      return;
+    }
     const session = {
       ws,
       joined: false, roomId: null, sid: null, nickname: null, ukPub: null, selfSig: null,
@@ -347,9 +368,21 @@ function createHttpServer(options) {
       try { ws.ping(); } catch (e) { /* noop */ }
     }
     db.purgeSessions(Date.now());
+    if (hub.sweepMaps) hub.sweepMaps(Date.now());
   }, P.LIMITS.HEARTBEAT_MS);
 
   return { server, wss, heartbeat };
+}
+
+/* Client IP for rate limiting. X-Forwarded-For is honoured ONLY when a
+ * trusted reverse proxy is explicitly configured, otherwise any client could
+ * spoof the header and bypass login throttling. */
+function clientIp(req) {
+  if (config.trustProxy) {
+    const xf = req.headers['x-forwarded-for'];
+    if (xf) return String(xf).split(',')[0].trim();
+  }
+  return String(req.socket.remoteAddress || '');
 }
 
 function sidOf(req, url) {

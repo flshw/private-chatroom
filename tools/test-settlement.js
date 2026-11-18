@@ -140,5 +140,37 @@ console.log('\n=== 结算与下一局回归测试 ===');
   check('重开保留对家配置', st.partnerSid === 'bot_2', 'partner=' + st.partnerSid);
 }
 
+// Test 3: level progression — no skip, single terminal, order 2->3->...->A.
+{
+  const sb = makeSandbox(), sent = [];
+  const game = makeGame(sb, sent);
+  const seq = [15, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]; // 2,3,...,K,A
+  let cur = 15, ok = true;
+  for (let i = 0; i < seq.length - 1; i++) {
+    const r = game.nextLevelFrom(cur, 1);
+    if (r.level !== seq[i + 1] || r.cleared) { ok = false; break; }
+    cur = r.level;
+  }
+  check('打几逐级推进不跳级 (2→3→…→A)', ok, 'stopped at ' + cur);
+  const last = game.nextLevelFrom(14, 1); // A + 1 -> clear
+  check('打A后再升级即通关且有终局', last.cleared === true && last.level === 14, JSON.stringify(last));
+  const clearEarly = game.nextLevelFrom(15, 99);
+  check('大delta也停在A并标记通关(不无限回绕)', clearEarly.cleared === true && clearEarly.level === 14, JSON.stringify(clearEarly));
+}
+
+// Test 4: two-team levels advance independently; next deal uses winner's level.
+{
+  const sb = makeSandbox(), sent = [];
+  const game = makeGame(sb, sent);
+  const st = seedRound(sb, game, sent, 1, 15);
+  st.teamLevel = [15, 15];
+  // finish order starts with seat0 (team0) => team0 wins and advances only.
+  st.finishOrder = ['me', 'bot_1', 'bot_2'];
+  game.onMessage({ kind: 'finished', by: 'bot_2', order: st.finishOrder.slice(), round: 1 });
+  check('仅赢家队升级(team0≠team1)', st.teamLevel[0] !== st.teamLevel[1], JSON.stringify(st.teamLevel));
+  check('下一局使用赢家队的新级', st.level === st.teamLevel[0], 'level=' + st.level + ' teams=' + JSON.stringify(st.teamLevel));
+  check('结算快照含两队级与胜队', !!(st.result && st.result.teamLevel && st.result.winnerTeam != null), JSON.stringify(st.result && st.result.teamLevel));
+}
+
 console.log('\n=== 结果: ' + pass + ' 通过 / ' + fail + ' 失败 ===');
 process.exit(fail ? 1 : 0);

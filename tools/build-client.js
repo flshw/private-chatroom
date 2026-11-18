@@ -47,7 +47,16 @@ const baseMarkers = [
   ['localStorage 密钥持久化', "localStorage.setItem(ukStoreKey(roomId)"],
   ['退出房间按钮', 'id="btn-exit"'],
   ['退出房间流程', 'function leaveRoom()'],
-  ['启动脚本', 'boot();']
+  ['启动脚本', 'boot();'],
+  /* v22: E2EE security + seq reliability (both editions) */
+  ['SSK指纹白名单', 'var KNOWN_SSK_FP = ['],
+  ['配置指纹校验', 'sskFingerprint(config.serverPubKey)'],
+  ['验签拒绝帧内公钥', 'var verifyWith = senderUkPub;'],
+  ['拒绝未验签发送者', 'MSG-DROP unverified sender='],
+  ['服务端确认seq对齐', 'SEQ-RESYNC'],
+  ['历史消息去重', 'state.msgKeys[dkey]'],
+  ['历史sid归属', 'state.mySids[env.senderSid]'],
+  ['成员表epoch', 'memberList.epoch != null']
 ];
 
 function build(version, parts, markers, outFile) {
@@ -135,8 +144,8 @@ const deluxeMarkers = baseMarkers.concat([
   ['静态背景无动画', 'window.PC3D.renderStatic()'],
   ['3D引擎无RAF动画循环', 'function start() { renderStatic(); }'],
   ['3D引擎移除旋转牌', 'MOTION POLICY: this scene is ALWAYS STATIC'],
-  ['过牌乐观即时反馈', 'state._passEchoSig'],
-  ['过牌防重复计数', 'consume the guard, do not double-count'],
+  ['过牌乐观即时反馈', 'state._myPassPending'],
+  ['过牌防重复计数', 'state._myPassPending--;'],
   ['过牌领出者修复', 'only a PLAY (never a pass) may win the trick'],
   ['赢家出局领出顺延', 'function nextActiveSid(fromSid)'],
   ['领出跳过出局座位', 'if (state.finishOrder.indexOf(leadSid) !== -1) {'],
@@ -241,7 +250,22 @@ const deluxeMarkers = baseMarkers.concat([
   ['框选滚动坐标修正', 'x: e.clientX - r.left + hand.scrollLeft'],
   ['框选拖拽阈值', 'DRAG_TH = 6'],
   ['牌局动态半透明背景', 'background:rgba(10,16,34,.5)'],
-  ['牌局动态常显滚动条', 'overflow-y:scroll;overflow-x:hidden']
+  ['牌局动态常显滚动条', 'overflow-y:scroll;overflow-x:hidden'],
+  /* v22: 规则完整性 + 状态可靠性 + XSS (deluxe only) */
+  ['昵称XSS修复', "note.textContent = '';"],
+  ['进贡规则引擎', 'function applyTribute(hands, finishOrder, teamOf, level)'],
+  ['进贡发牌接入', 'window.PCGame.applyTribute(hands'],
+  ['进贡首出权', 'msg.tribute.firstSeat'],
+  ['两级队各自升级', 'teamLevel: state.teamLevel.slice()'],
+  ['级数序列无跳级', 'var LEVEL_SEQ = [15, 3, 4'],
+  ['通关终局', 'state.seasonCleared = adv.cleared'],
+  ['陈旧帧丢弃', 'STALE-DROP'],
+  ['出牌失败回滚', '出牌未送达，已撤销本地出牌'],
+  ['过牌失败回滚', '过牌未送达，已撤销本地过牌'],
+  ['过牌回显计数', '_myPassPending'],
+  ['房主禁旁观', '房主不能旁观他人'],
+  ['名次合法性校验', 'FINISHED-REJECT'],
+  ['重复出牌告警', 'PLAY-SUSPECT']
 ]);
 build('豪华版', deluxeParts, deluxeMarkers, 'client/dist/private-chat-deluxe.template.html');
 

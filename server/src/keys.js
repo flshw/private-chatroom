@@ -114,6 +114,25 @@ class KeyStore {
     }
     return fs.readFileSync(file, 'utf8').trim();
   }
+
+  /* encrypt/decrypt short secrets (e.g. share codes) with a key derived from
+   * the server secret. AES-256-GCM; DB-only leaks cannot recover the plaintext
+   * bearer codes without also stealing the key file. */
+  encryptSecret(plain) {
+    const key = nodeCrypto.createHash('sha256').update(this.serverSecret()).digest();
+    const iv = nodeCrypto.randomBytes(12);
+    const c = nodeCrypto.createCipheriv('aes-256-gcm', key, iv);
+    const ct = Buffer.concat([c.update(String(plain), 'utf8'), c.final()]);
+    return iv.toString('base64') + ':' + c.getAuthTag().toString('base64') + ':' + ct.toString('base64');
+  }
+  decryptSecret(blob) {
+    if (!blob || blob.indexOf(':') === -1) return ''; // legacy plaintext row
+    const key = nodeCrypto.createHash('sha256').update(this.serverSecret()).digest();
+    const [ivB64, tagB64, ctB64] = blob.split(':');
+    const d = nodeCrypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
+    d.setAuthTag(Buffer.from(tagB64, 'base64'));
+    return Buffer.concat([d.update(Buffer.from(ctB64, 'base64')), d.final()]).toString('utf8');
+  }
 }
 
 module.exports = { KeyStore, b64u };

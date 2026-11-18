@@ -271,8 +271,8 @@ const canonical = P.canonicalJSON;
     deluxe.indexOf('state.botHands[seat.sid] = window.PCBots.sortedHand') !== -1 &&
     deluxe.indexOf('bots: state.seats.filter') !== -1);
   check('游戏按钮按 4 人门槛启用', deluxe.indexOf('membersList.length >= 4') !== -1);
-  check('开局必须选择另外 3 名玩家',
-    deluxe.indexOf('game.requestStart([mySid].concat(picked));') !== -1 &&
+  check('开局必须选择另外 3 名玩家并指定对家',
+    deluxe.indexOf('game.requestStart([mySid].concat(picked), partner);') !== -1 &&
     deluxe.indexOf("picked.length !== 3") !== -1);
   check('选人改为弹窗并在开局后关闭',
     deluxe.indexOf('id="game-setup-mask"') !== -1 &&

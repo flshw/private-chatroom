@@ -10,8 +10,9 @@
 window.PCMembers = (function () {
   var table = new Map();   // sid -> {sid, nickname, ukPub, selfSig}
   var version = 0;
+  var epoch = null;        // server process epoch; change => version baseline resets
 
-  function reset() { table = new Map(); version = 0; }
+  function reset() { table = new Map(); version = 0; epoch = null; }
 
   function all() {
     return Array.from(table.values());
@@ -21,8 +22,16 @@ window.PCMembers = (function () {
 
   async function verifyList(memberList, memberListSig, roomPubKeyPem) {
     if (!memberList || !Array.isArray(memberList.members)) return false;
+    // A server restart resets memberVersion to 1. If the (RK-signed) epoch
+    // changed, compare versions against 0 so the fresh low version is accepted
+    // — otherwise online clients would reject every list and lock up until F5.
+    // Lists without epoch are treated as legacy (strict check). NOTE: we only
+    // COMPUTE the baseline here; apply() commits epoch/version after signatures
+    // verify, so a forged list cannot poison our version state.
+    var baseVersion = version;
+    if (memberList.epoch != null && memberList.epoch !== epoch) baseVersion = 0;
     // 3) monotonic version
-    if (!(memberList.version > version)) return false;
+    if (!(memberList.version > baseVersion)) return false;
     // 1) RK signature over canonical memberList
     var listOk = false;
     try { listOk = await PCCrypto.verifySig(memberList, memberListSig, roomPubKeyPem); }
@@ -49,6 +58,7 @@ window.PCMembers = (function () {
       table.set(m.sid, { sid: m.sid, nickname: m.nickname, ukPub: m.ukPub, selfSig: m.selfSig });
     }
     version = memberList.version;
+    if (memberList.epoch != null) epoch = memberList.epoch;
     return true;
   }
 

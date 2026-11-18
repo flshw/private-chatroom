@@ -29,8 +29,13 @@ class Hub {
     this.serverSecret = options.serverSecret || this.keys.serverSecret();
     this.sessions = new Set();
     this.byRoom = new Map();      // roomId -> Map<sid, session>
-    this.memberVersion = new Map(); // roomId -> integer, monotonic
+    this.memberVersion = new Map(); // roomId -> integer, monotonic (per process)
+    /* Process epoch: randomised once at boot. Included in every signed member
+     * list so clients can detect a server restart (which resets memberVersion
+     * to 1) and accept the fresh list instead of rejecting it forever. */
+    this.epoch = Date.now() + '-' + Math.floor(Math.random() * 1e9);
     this.rate = new Map();        // sid -> {count, windowAt}
+    this.controlRate = new Map();  // sid -> {count, windowAt} for RTC/spectate frames
     /* Message seq is per SENDER SESSION, not per room. Each member starts at
      * seq=1 when they JOIN (including an F5 reconnect with a fresh sid). */
     this.seqBySid = new Map();    // sid -> last accepted seq
@@ -63,6 +68,10 @@ class Hub {
       ' room=' + (session.roomId || '-') + ' joined=' + !!session.joined + ' heldMs=' + heldMs +
       ' total=' + this.sessions.size);
     this.sessions.delete(session);
+    if (session.sid) {
+      this.rate.delete(session.sid);
+      this.controlRate.delete(session.sid);
+    }
     if (session.roomId && session.sid) {
       const room = this.byRoom.get(session.roomId);
       if (room) {
@@ -101,10 +110,15 @@ class Hub {
     });
   }
 
-  error(session, code, note) {
+  error(session, code, note, ackSeq) {
     this.connLog('ERROR id=' + (session.connId || '?') + ' sid=' + (session.sid || '-') +
-      ' room=' + (session.roomId || '-') + ' code=' + code + (note ? ' note=' + note : ''));
-    session.send({ type: P.MSG.ERROR, code, note: note || undefined });
+      ' room=' + (session.roomId || '-') + ' code=' + code + (note ? ' note=' + note : '') +
+      (ackSeq != null ? ' ackSeq=' + ackSeq : ''));
+    const frame = { type: P.MSG.ERROR, code, note: note || undefined };
+    // Carry the server's last confirmed seq so the sender can resynchronise
+    // instead of drifting into permanent E_REPLAY after a rejected message.
+    if (ackSeq != null) frame.ackSeq = ackSeq;
+    session.send(frame);
   }
 
   /* Build the signed member-public-key list for a room. */
@@ -118,7 +132,7 @@ class Hub {
       }
     }
     members.sort((a, b) => a.sid.localeCompare(b.sid));
-    return { version: this.memberVersion.get(roomId) || 1, roomId, members };
+    return { version: this.memberVersion.get(roomId) || 1, roomId, epoch: this.epoch, members };
   }
 
   broadcastMemberKeys(roomId) {
@@ -137,6 +151,20 @@ class Hub {
     }
   }
 
+  /* Bound the diagnostic/lookup maps so long-running servers don't leak. */
+  sweepMaps(now) {
+    const TTL = 7 * 24 * 3600 * 1000; // 7 days
+    if (this._lastSweep && now - this._lastSweep < 3600 * 1000) return;
+    this._lastSweep = now;
+    if (this.recentUkSid && this.recentUkSid.size > 5000) {
+      // recentUkSid values have no timestamp; cap by clearing when oversized.
+      // It is diagnostic-only, so dropping stale entries is safe.
+      this.recentUkSid.clear();
+    }
+    for (const [sid, r] of this.rate) if (now - r.windowAt > 60 * 1000) this.rate.delete(sid);
+    for (const [sid, r] of this.controlRate) if (now - r.windowAt > 60 * 1000) this.controlRate.delete(sid);
+  }
+
   handle(session, frame) {
     if (!frame || typeof frame !== 'object' || !frame.type) {
       return this.error(session, P.ERR.BAD_ENVELOPE);
@@ -145,6 +173,13 @@ class Hub {
     if (frame.type === P.MSG.JOIN) return this.onJoin(session, frame);
     if (!session.joined) return this.error(session, P.ERR.NOT_AUTHENTICATED);
     if (frame.type === P.MSG.MSG) return this.onMessage(session, frame);
+    // Rate-limit control frames (RTC signalling / spectate requests) which
+    // were previously unchecked — a member could flood a target with SDP or
+    // spectate prompts. On abuse, drop silently (no error spam back).
+    if (frame.type === P.MSG.RTC_SIGNAL || frame.type === P.MSG.GAME_SPECTATE ||
+        frame.type === P.MSG.GAME_SPECTATE_REPLY) {
+      if (!this.allowControl(session)) return;
+    }
     if (frame.type === P.MSG.RTC_SIGNAL) return this.onRtc(session, frame);
     if (frame.type === P.MSG.GAME_SPECTATE) return this.onSpectate(session, frame);
     if (frame.type === P.MSG.GAME_SPECTATE_REPLY) return this.onSpectateReply(session, frame);
@@ -241,35 +276,47 @@ class Hub {
     return r.count <= 20;
   }
 
+  /* Looser per-second cap for RTC/spectate control frames (SDP/ICE can burst). */
+  allowControl(session) {
+    const now = Date.now();
+    let r = this.controlRate.get(session.sid);
+    if (!r || now - r.windowAt >= 1000) { r = { count: 0, windowAt: now }; this.controlRate.set(session.sid, r); }
+    r.count++;
+    return r.count <= 30;
+  }
+
   onMessage(session, f) {
-    if (!this.allow(session)) return this.error(session, P.ERR.RATE_LIMIT);
+    // All rejections below happen BEFORE seqBySid advances, so the server's
+    // confirmed seq is still the current value. Echo it back for resync.
+    const rej = (code) => this.error(session, code, undefined, this.seqBySid.get(session.sid) || 0);
+    if (!this.allow(session)) return rej(P.ERR.RATE_LIMIT);
     const e = f.envelope;
-    if (!e || typeof e !== 'object') return this.error(session, P.ERR.BAD_ENVELOPE);
+    if (!e || typeof e !== 'object') return rej(P.ERR.BAD_ENVELOPE);
     const roomId = session.roomId;
     const room = this.db.room(roomId);
-    if (!room || room.expires_at <= Date.now()) return this.error(session, P.ERR.ROOM_INVALID);
-    if (e.roomId !== roomId || e.senderSid !== session.sid) return this.error(session, P.ERR.BAD_ENVELOPE);
-    if (e.v !== P.PROTOCOL_VERSION) return this.error(session, P.ERR.BAD_VERSION);
+    if (!room || room.expires_at <= Date.now()) return rej(P.ERR.ROOM_INVALID);
+    if (e.roomId !== roomId || e.senderSid !== session.sid) return rej(P.ERR.BAD_ENVELOPE);
+    if (e.v !== P.PROTOCOL_VERSION) return rej(P.ERR.BAD_VERSION);
     // Strictly increasing seq PER SENDER SESSION. A room-global counter made
     // every second member's first message fail with E_REPLAY.
     const expected = (this.seqBySid.get(session.sid) || 0) + 1;
-    if (e.seq !== expected) return this.error(session, P.ERR.REPLAY);
+    if (e.seq !== expected) return rej(P.ERR.REPLAY);
     // Clock tolerance using server-corrected time.
     if (Math.abs(Number(e.ts) - Date.now()) > P.LIMITS.CLOCK_TOLERANCE_MS) {
-      return this.error(session, P.ERR.REPLAY);
+      return rej(P.ERR.REPLAY);
     }
     // Sender public key must match the registered one.
     const senderPub = String(f.senderPub || '');
-    if (senderPub !== session.ukPub) return this.error(session, P.ERR.KEY_INVALID);
+    if (senderPub !== session.ukPub) return rej(P.ERR.KEY_INVALID);
     // wraps must cover exactly the current member set — prevents excluding someone.
     const wraps = e.wraps;
     if (!wraps || typeof wraps !== 'object' || Array.isArray(wraps)) {
-      return this.error(session, P.ERR.WRAP_INCOMPLETE);
+      return rej(P.ERR.WRAP_INCOMPLETE);
     }
     const map = this.byRoom.get(roomId) || new Map();
     const sids = Array.from(map.keys()).sort().join('\u0001');
     const wrapSids = Object.keys(wraps).sort().join('\u0001');
-    if (sids !== wrapSids) return this.error(session, P.ERR.WRAP_INCOMPLETE);
+    if (sids !== wrapSids) return rej(P.ERR.WRAP_INCOMPLETE);
     // Verify sender's RSA-PSS signature over canonical(envelope).
     let sigOk = false;
     try {
@@ -278,7 +325,7 @@ class Hub {
         saltLength: nodeCrypto.constants.RSA_PSS_SALTLEN_DIGEST
       }, Buffer.from(String(f.sig || ''), 'base64'));
     } catch (err) { sigOk = false; }
-    if (!sigOk) return this.error(session, P.ERR.SIG_INVALID);
+    if (!sigOk) return rej(P.ERR.SIG_INVALID);
 
     const ts = Date.now();
     const m = {
@@ -289,7 +336,7 @@ class Hub {
       expiresAt: room.expires_at
     };
     // Best-effort size guards (base64 fields already bounded by WS frame limit).
-    if (!m.iv || !m.ct || !m.tag) return this.error(session, P.ERR.BAD_ENVELOPE);
+    if (!m.iv || !m.ct || !m.tag) return rej(P.ERR.BAD_ENVELOPE);
     this.db.addMessage(m);
     this.seqBySid.set(session.sid, e.seq);
     this.connLog('MSG-OK id=' + (session.connId || '?') + ' sid=' + session.sid + ' room=' + roomId +

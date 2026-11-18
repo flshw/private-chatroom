@@ -169,7 +169,12 @@ window.PCCrypto = (function () {
     var K = unwrapKey(envelope.wraps[mySid], ukPrivatePem);
     var aad = envelope.roomId + '|' + envelope.senderSid + '|' + envelope.seq + '|' + envelope.ts + '|' + envelope.kind;
     var plain = aesDecrypt(K, aad, envelope.iv, envelope.ct, envelope.tag);
-    var verifyWith = senderUkPub || senderPub;
+    // SECURITY: the sender public key MUST come from the RK-signed member
+    // table (passed by the caller). Never fall back to a key carried inside
+    // the frame/DB — a malicious server could then forge a message under any
+    // senderSid using its own key and this check would still pass.
+    var verifyWith = senderUkPub;
+    if (!verifyWith) throw new Error('消息发送者身份未验证：不在已签名成员表');
     if (!verifySig(root.PCProtocol.signedPart(envelope), sig, verifyWith)) {
       throw new Error('消息签名校验失败');
     }

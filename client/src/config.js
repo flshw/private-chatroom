@@ -8,6 +8,30 @@ window.PCConfig = (function () {
     return PCCrypto.verifySig(config, sig, sskPem);
   }
 
+  /* SECURITY: pin the set of known platform SSK public-key fingerprints.
+   * The config block is signed by SSK, but its own `serverPubKey` field is
+   * part of the signed data — using it alone to verify the signature is a
+   * self-referential trust anchor: an attacker who rewrites the config could
+   * swap in their own key and re-sign. We therefore also require the key's
+   * SPKI/SHA-256 fingerprint to be in this code-baked allowlist. To bypass,
+   * an attacker must edit the JS itself (the known limit of single-file
+   * file:// distribution), not merely tamper with the injected config JSON.
+   * UPDATE: when rotating the platform SSK, append the new fingerprint here. */
+  var KNOWN_SSK_FP = [
+    'e45b5c64269ef1ad', // production platform SSK
+    '2089a8803bb0411a'  // local dev SSK
+  ];
+
+  function sskFingerprint(pem) {
+    try {
+      var pub = PCCrypto.pemToPublic(pem);
+      var der = window.forge.asn1.toDer(window.forge.pki.publicKeyToAsn1(pub)).getBytes();
+      var md = window.forge.md.sha256.create();
+      md.update(der, 'binary');
+      return md.digest().toHex().slice(0, 16).toLowerCase();
+    } catch (e) { return ''; }
+  }
+
   /* Returns Promise<{ok, config, error, offsetMs}>. Fails closed on any error. */
   async function load() {
     var config = window.__PC_CONFIG__;
@@ -17,6 +41,10 @@ window.PCConfig = (function () {
     if (!/BEGIN PUBLIC KEY/.test(config.roomPubKey || '') ||
         !/BEGIN PUBLIC KEY/.test(config.serverPubKey || '')) {
       return { ok: false, error: '配置缺少公钥，已停止连接' };
+    }
+    var fp = sskFingerprint(config.serverPubKey);
+    if (!fp || KNOWN_SSK_FP.indexOf(fp) === -1) {
+      return { ok: false, error: '服务器签名公钥不受信任（指纹 ' + (fp || '无效') + '），已停止连接' };
     }
     var valid = false;
     try { valid = verify(config, sig, config.serverPubKey); }

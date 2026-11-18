@@ -74,7 +74,8 @@ window.PCGameClient = (function () {
         '=== 掼蛋机器人诊断日志 ===',
         '时间 ' + new Date().toLocaleString(),
         '我=' + mySid + ' 房主=' + state.hostSid + ' 我是否房主=' + isHost(),
-        '阶段=' + state.phase + ' 局=' + state.roundNo + ' 级=' + rankName(state.level),
+        '阶段=' + state.phase + ' 局=' + state.roundNo + ' 级=' + rankName(state.level) +
+          ' 两队级=' + state.teamLevel.map(rankName).join('/') + ' 上局胜队=' + state.winnerTeam,
         '座位=' + JSON.stringify(state.seats.map(function (s) { return (s.sid || '') + (s.isBot ? '(bot)' : ''); })),
         '当前回合=' + state.turn + ' 机器人手牌=' + botHandSizes(),
         '对家=' + (state.partnerSid || '-') + ' 我的座位=' + state.mySeat,
@@ -93,7 +94,11 @@ window.PCGameClient = (function () {
     }
 
     var state = {
-      level: 15,                      // start at 2
+      level: 15,                      // level currently being played (rank value; 15=2, 14=A)
+      teamLevel: [15, 15],            // [team0, team1] — each team's own level (seat parity)
+      winnerTeam: null,               // which team won the last round (sets next deal level)
+      pendingTributeOrder: null,      // last round finish order (seat idx) for next deal's 进贡
+      seasonCleared: false,           // true once a team passes A (通关)
       phase: 'idle',                  // idle|dealing|playing|finished
       seats: [],                      // [{sid,nickname,isMe}]
       players: null,                  // the four chosen sids (sorted) once a match is set
@@ -105,6 +110,7 @@ window.PCGameClient = (function () {
       table: null,                    // {cards, type, bySid}
       lastWinner: null,
       passes: 0,
+      _myPassPending: 0,            // count of my local passes awaiting their echo
       turn: null,
       finishOrder: [],
       result: null,                 // settlement snapshot once all ranks are known
@@ -234,6 +240,17 @@ window.PCGameClient = (function () {
       if (state.seats.length !== 4) { toast('需要 4 名玩家才能开局'); return null; }
       var deck = window.PCGame.makeDeck();
       var hands = window.PCGame.deal(deck);
+      // 进贡/还贡/抗贡: the host sees all four plaintext hands at deal time,
+      // so tribute is resolved centrally and consistently for everyone. The
+      // transformed hands are what actually get wrapped and played.
+      var tributeInfo = { events: [], resisted: false, firstSeat: null };
+      if (state.pendingTributeOrder && state.pendingTributeOrder.length === 4) {
+        var tr = window.PCGame.applyTribute(hands, state.pendingTributeOrder,
+          state.seats.map(function (s, i) { return i % 2; }), state.level);
+        hands = tr.hands;
+        tributeInfo = { events: tr.events, resisted: tr.resisted, firstSeat: tr.firstSeat };
+        dlog('TRIBUTE', JSON.stringify(tr.events) + ' firstSeat=' + tr.firstSeat);
+      }
       var wrapped = {};
       state.botHands = {};
       for (var i = 0; i < 4; i++) {
@@ -277,6 +294,8 @@ window.PCGameClient = (function () {
       return { kind: 'deal', round: state.roundNo, level: state.level, hands: wrapped,
         host: mySid, order: state.seats.map(function (s) { return s.sid; }),
         partner: state.partnerSid,
+        teamLevel: state.teamLevel.slice(), winnerTeam: state.winnerTeam,
+        tribute: tributeInfo,
         bots: state.seats.filter(function (s) { return s.isBot; }).map(function (s) { return s.sid; }),
         watchTargetOf: (function () {
           var m = {};
@@ -294,10 +313,36 @@ window.PCGameClient = (function () {
         ' myHand=' + (mySid && msg.hands && msg.hands[mySid] ? 'wrapped' : 'none'));
       state.roundNo = msg.round;
       state.level = msg.level;
+      if (Array.isArray(msg.teamLevel) && msg.teamLevel.length === 2) {
+        state.teamLevel = msg.teamLevel.slice();
+      } else if (state.teamLevel[0] !== state.level || state.teamLevel[1] !== state.level) {
+        state.teamLevel = [state.level, state.level];  // legacy deal: seed both teams
+      }
+      if (msg.winnerTeam != null) state.winnerTeam = msg.winnerTeam;
+      state.seasonCleared = false;
       state.hostSid = msg.host;
+      // 进贡 display + first-lead from the resolved tribute (host computed it).
+      var firstSeat = 0;
+      if (msg.tribute) {
+        firstSeat = (msg.tribute.firstSeat != null) ? msg.tribute.firstSeat : 0;
+        try {
+          var ev = msg.tribute.events || [];
+          if (msg.tribute.resisted) note('🛡 对方持双大王，抗贡成功！本局不进贡');
+          else if (ev.length) {
+            var lines = ev.map(function (e) {
+              var fromN = state.seats[e.from] ? state.seats[e.from].nickname : ('座' + e.from);
+              var toN = state.seats[e.to] ? state.seats[e.to].nickname : ('座' + e.to);
+              return fromN + (e.action === 'tribute' ? ' 进贡 ' : ' 还贡 ') +
+                toN + ' ' + cardShort(e.card);
+            });
+            note('🎁 进贡：' + lines.join('；'));
+          }
+        } catch (e) {}
+      }
+      state.pendingTributeOrder = null;  // consumed by this deal
       state.phase = 'playing';
       state.table = null; state.tablePattern = null; state.passes = 0;
-      state.lastWinner = null; state._passEchoSig = null;
+      state.lastWinner = null; state._myPassPending = 0;
       state.finishOrder = []; state.log = []; state.played = [];
       state.result = null; state.seatPlays = {}; state.playedBySeat = {};   // fresh round
       if (msg.partner) state.partnerSid = msg.partner;
@@ -322,7 +367,9 @@ window.PCGameClient = (function () {
         } else {
           note('新一局开始（旁观等待中）· 打' + rankName(state.level));
         }
-        state.turn = msg.order && msg.order[0];
+        state.turn = (msg.tribute && msg.tribute.firstSeat != null)
+          ? (msg.order[msg.tribute.firstSeat] || msg.order[0])
+          : (msg.order && msg.order[0]);
       } else if (msg.hands && msg.hands[mySid]) {
         var w = msg.hands[mySid];
         try {
@@ -333,7 +380,9 @@ window.PCGameClient = (function () {
           note('发牌完成，你拿到 ' + state.hand.length + ' 张 · 打' + rankName(state.level));
         } catch (e) { toast('手牌解封失败：' + e.message); }
       }
-      state.turn = (msg.order && msg.order[0]) || state.turn;
+      state.turn = (msg.tribute && msg.tribute.firstSeat != null)
+        ? (msg.order[msg.tribute.firstSeat] || (msg.order && msg.order[0]))
+        : ((msg.order && msg.order[0]) || state.turn);
       onUpdate(state);
       scheduleBot();
     }
@@ -376,7 +425,25 @@ window.PCGameClient = (function () {
       var msg = { kind: 'play', round: state.roundNo, by: mySid,
         cards: sel.map(function (c) { return { s: c.s, r: c.r, id: c.id }; }),
         pattern: { type: pattern.type, rank: pattern.rank, len: pattern.len } };
-      sendGame(msg);
+      var handBefore = state.hand.slice();
+      var playedBefore = state.played.slice();
+      var bySeatBefore = state.playedBySeat[mySid] || 0;
+      var tableBefore = state.table, tablePatBefore = state.tablePattern;
+      var seatPlayBefore = state.seatPlays[mySid];
+      var passesBefore = state.passes, winnerBefore = state.lastWinner;
+      // Send through sendDiag so an async rejection (dropped WSS / E_REPLAY)
+      // restores the optimistic state — otherwise this client desyncs forever.
+      sendDiag(msg, 'PLAY by ' + mySid + ' ' + sel.length + ' cards', function () {
+        state.hand = handBefore;
+        state.played = playedBefore;
+        state.playedBySeat[mySid] = bySeatBefore;
+        state.table = tableBefore; state.tablePattern = tablePatBefore;
+        if (seatPlayBefore === undefined) delete state.seatPlays[mySid];
+        else state.seatPlays[mySid] = seatPlayBefore;
+        state.passes = passesBefore; state.lastWinner = winnerBefore;
+        toast('出牌未送达，已撤销本地出牌，请重试');
+        onUpdate(state);
+      });
       // Immediate visual acknowledgement: drop the played cards from the hand,
       // credit the counter, and repaint — no waiting for the E2EE round trip.
       // Turn/table/log are left to onPlay(broadcast) as the single source of truth.
@@ -406,9 +473,22 @@ window.PCGameClient = (function () {
       // tick; pass() used to wait for the full E2EE round-trip so a tap looked
       // dead. Apply locally now and ignore our own echo (signature guard) so
       // `passes` is never counted twice.
-      state._passEchoSig = state.roundNo + '|' + mySid;
+      // Snapshot before the optimistic apply so a rejected send can restore it.
+      var pendingBefore = state._myPassPending;
+      var passesBefore = state.passes;
+      var turnBefore = state.turn, tableBefore = state.table;
+      var tablePatBefore = state.tablePattern, seatPlaysBefore = Object.assign({}, state.seatPlays);
+      state._myPassPending++;
       applyPass(mySid);
-      sendGame({ kind: 'pass', round: state.roundNo, by: mySid });
+      sendDiag({ kind: 'pass', round: state.roundNo, by: mySid },
+        'PASS by ' + mySid, function () {
+          state._myPassPending = pendingBefore;
+          state.passes = passesBefore;
+          state.turn = turnBefore; state.table = tableBefore; state.tablePattern = tablePatBefore;
+          state.seatPlays = seatPlaysBefore;
+          toast('过牌未送达，已撤销本地过牌，请重试');
+          onUpdate(state);
+        });
       return true;
     }
 
@@ -476,6 +556,17 @@ window.PCGameClient = (function () {
         if (msg.by !== mySid) {
           state.playedBySeat[msg.by] = (state.playedBySeat[msg.by] || 0) + (msg.cards || []).length;
         }
+        // VALIDITY: warn (do not drop — liveness first) if a remote play
+        // reuses card ids already played this round. A tampered client could
+        // otherwise "replay" the same cards; the log makes it visible.
+        if (msg.by !== mySid && (msg.cards || []).length) {
+          var reused = (msg.cards || []).filter(function (c) {
+            return state.played.some(function (p) { return p.id === c.id; });
+          }).length;
+          if (reused === msg.cards.length) {
+            dlog('PLAY-SUSPECT', 'by=' + msg.by + ' all ' + reused + ' cards already played');
+          }
+        }
         var seat = seatOfSid(msg.by);
         if (msg.by !== mySid) {
           state.hand = state.hand.filter(function (c) {
@@ -496,11 +587,13 @@ window.PCGameClient = (function () {
     }
 
     function onPass(msg) {
-      dlog('ECHO-PASS', 'by=' + msg.by + ' round=' + msg.round + ' | turn before=' + state.turn);
-      // Our own optimistic pass already applied this broadcast's effect.
-      var sig = state.roundNo + '|' + msg.by;
-      if (msg.by === mySid && state._passEchoSig === sig) {
-        state._passEchoSig = null;   // consume the guard, do not double-count
+      dlog('ECHO-PASS', 'by=' + msg.by + ' round=' + msg.round + ' | turn before=' + state.turn +
+        ' pending=' + state._myPassPending);
+      // My own optimistic pass already applied this echo's effect. Consume one
+      // pending pass in arrival order (E2EE seq guarantees ordering) — unlike
+      // a round|sid signature this stays unique across multiple passes per round.
+      if (msg.by === mySid && state._myPassPending > 0) {
+        state._myPassPending--;
         return;
       }
       applyPass(msg.by);
@@ -692,7 +785,14 @@ window.PCGameClient = (function () {
     }
 
     function rankName(r) {
-      return ({ 15: '2', 14: 'A', 13: 'K', 12: 'Q', 11: 'J' })[r] || String(r);
+      return ({ 15: '2', 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 16: '小王', 17: '大王' })[r] || String(r);
+    }
+    /* Compact single-card label for tribute logs, e.g. "K♠" / "大王". */
+    function cardShort(c) {
+      if (!c) return '';
+      if (c.r === 16 || c.r === 17) return rankName(c.r);
+      var SUIT = { S: '♠', H: '♥', C: '♣', D: '♦' };
+      return rankName(c.r) + (SUIT[c.s] || '');
     }
     /* Human-readable cards for the play log: e.g. "K♥", "对 7", "顺子 3-K".
      * Suits make each play concrete without flooding the one-line log. */
@@ -761,15 +861,26 @@ window.PCGameClient = (function () {
 
       var levelBefore = state.level;
       var seatIdxOrder = order.map(function (sid) { return seatOfSid(sid); });
-      var delta = window.PCGame.levelDelta(seatIdxOrder, state.seats.map(function (s, i) { return i % 2; }));
-      var firstTeam = seatIdxOrder[0] % 2;
+      var teamOf = state.seats.map(function (s, i) { return i % 2; });
+      var delta = window.PCGame.levelDelta(seatIdxOrder, teamOf);
+      var winnerTeam = teamOf[seatIdxOrder[0]];          // the team that took 大科
+      // Remember last round's finish order (as seat indices) so the next deal
+      // can apply 进贡/还贡/抗贡 before wrapping hands.
+      state.pendingTributeOrder = seatIdxOrder.slice();
+      var firstTeam = winnerTeam;
       var myTeam = state.mySeat % 2;
       var win = firstTeam === myTeam;
-      // Advance the shared room level by the WINNING team's delta on EVERY
-      // client. (Bumping only when "my team won" made the two teams disagree
-      // on the current level; the next deal carries the host's level but the
-      // settlement display diverged.) 'win' is now display-only.
-      state.level = bumpLevel(state.level, delta);
+      // Each team keeps its OWN level; only the winning team advances. The
+      // next deal uses the winner's new level. This matches real Guandan
+      // (both sides climb separately) instead of a single shared level.
+      var adv = advanceLevel(state.teamLevel[winnerTeam], delta);
+      state.teamLevel[winnerTeam] = adv.level;
+      state.winnerTeam = winnerTeam;
+      state.seasonCleared = adv.cleared;
+      state.level = state.teamLevel[winnerTeam];          // level for the next deal
+      if (adv.cleared) {
+        try { note('🏆 ' + (winnerTeam === myTeam ? '本队' : '对方') + ' 打过 A，通关！'); } catch (e) {}
+      }
 
       state.result = {
         order: order,
@@ -778,6 +889,7 @@ window.PCGameClient = (function () {
             isMe: sid === mySid, teammate: isTeammate(sid, mySid) };
         }),
         win: win, delta: delta, levelBefore: levelBefore, levelAfter: state.level,
+        teamLevel: state.teamLevel.slice(), winnerTeam: winnerTeam, cleared: adv.cleared,
         round: state.roundNo, partnerSid: state.partnerSid
       };
       state.phase = 'finished';
@@ -785,7 +897,8 @@ window.PCGameClient = (function () {
       try {
         note('🏁 第 ' + state.roundNo + ' 局结束 · ' +
           order.map(function (sid, i) { return RANK_TITLES[i] + ' ' + seatNick(sid); }).join(' / ') +
-          (win ? ' · 本队胜，升 ' + delta + ' 级 → 打' + rankName(state.level) : ' · 对方领先'));
+          (adv.cleared ? ' · ' + (win ? '本队' : '对方') + '通关，打过 A！'
+            : (win ? ' · 本队胜，升 ' + delta + ' 级 → 打' + rankName(state.level) : ' · 对方领先，打' + rankName(state.level))));
       } catch (e) {}
       dlog('MATCH-OVER', 'order=' + JSON.stringify(order) + ' level ' + rankName(levelBefore) +
         ' -> ' + rankName(state.level) + ' win=' + win + ' round=' + state.roundNo);
@@ -795,6 +908,23 @@ window.PCGameClient = (function () {
     function onFinished(msg) {
       dlog('FINISHED-ECHO', 'by=' + msg.by + ' order=' + JSON.stringify(msg.order) +
         ' | prev=' + JSON.stringify(state.finishOrder));
+      // VALIDITY GUARD: reject forged/tampered finish frames. Every sid in the
+      // order must be a real seat this round, no duplicates, and the reporter
+      // must be in the order. Without this a tampered client could inject any
+      // ranking (cheat / state fork). Fine for honest clients; blocks garbage.
+      var orderIn = Array.isArray(msg.order) ? msg.order : (msg.by ? [msg.by] : []);
+      var validSids = state.seats.map(function (s) { return s.sid; });
+      var seenFin = {};
+      var bad = orderIn.length === 0 || orderIn.length > 4 ||
+        (msg.by && orderIn.indexOf(msg.by) === -1);
+      orderIn.forEach(function (sid) {
+        if (validSids.indexOf(sid) === -1 || seenFin[sid]) bad = true;
+        seenFin[sid] = true;
+      });
+      if (bad) {
+        dlog('FINISHED-REJECT', 'invalid order/by | order=' + JSON.stringify(orderIn) + ' by=' + msg.by);
+        return;
+      }
       // Merge, don't overwrite: echoes may arrive out of order. Keep first-seen
       // order and never drop a place that is already recorded.
       var merged = state.finishOrder.slice();
@@ -814,6 +944,7 @@ window.PCGameClient = (function () {
     function nextRound() {
       if (state.phase !== 'finished') { toast('本局尚未结束'); return false; }
       if (!isHost()) { toast('只有房主可以开始下一局'); return false; }
+      if (state.seasonCleared) { toast('已通关（打过 A），请重新开局'); return false; }
       state.roundNo = (state.roundNo || 0) + 1;
       state.result = null;
       state.phase = 'dealing';
@@ -826,16 +957,36 @@ window.PCGameClient = (function () {
       return true;
     }
 
-    function bumpLevel(cur, delta) {
-      var next = cur + delta;
-      if (next > 14) next = 3 + ((next - 15) % 12); // wrap A->3 after passing A
-      return next;
+    /* Guandan level order: this room starts at 2 (rank 15) and climbs
+     * 3,4,...,K,A. The DEALT rank follows this order; passing A clears the
+     * season. (rankName maps 15->2, 14->A.) Starting at 2 avoids an immediate
+     * clear — 2 is the entry level here, A is the top. */
+    var LEVEL_SEQ = [15, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+    function advanceLevel(cur, delta) {
+      var i = LEVEL_SEQ.indexOf(cur);
+      if (i === -1) i = 0; // unknown -> start at 2
+      var ni = i + Math.max(0, delta);
+      if (ni >= LEVEL_SEQ.length) {
+        return { level: LEVEL_SEQ[LEVEL_SEQ.length - 1], cleared: true };
+      }
+      return { level: LEVEL_SEQ[ni], cleared: false };
     }
 
     /* Receive a decrypted game payload from the chat E2EE layer. */
     function onMessage(msg) {
       dlog('RECV', 'kind=' + msg.kind + (msg.by ? ' by=' + msg.by : '') +
         (msg.round ? ' round=' + msg.round : '') + ' | decode ok');
+      // STALE-FRAME GUARD: a delayed/replayed frame from a previous round must
+      // never mutate the current trick's table/turn/finishOrder. 'deal' and
+      // 'start' legitimately advance the round, so they are exempt; every
+      // in-round action carries msg.round and is checked here.
+      if (msg.round != null && msg.kind !== 'deal' && msg.kind !== 'start') {
+        if (msg.round !== state.roundNo) {
+          dlog('STALE-DROP', 'kind=' + msg.kind + ' frame.round=' + msg.round +
+            ' local.round=' + state.roundNo);
+          return;
+        }
+      }
       switch (msg.kind) {
         case 'deal': onDeal(msg); break;
         case 'deal_request': openDealForLate(msg); break;
@@ -862,6 +1013,12 @@ window.PCGameClient = (function () {
         if (state.myRelation && r.spectatorSid === state.myRelation.spectatorSid) mine = r;
         if (r.targetSid === mySid && r.status === 'pending') pendingTarget = r;
       }
+      // Never let the host enter spectator mode: isHost() would go false and
+      // freeze the local bot driver. Server relations stay authoritative; we
+      // simply don't render the host as an observer.
+      if (mine && mine.status === 'approved' && state.hostSid === mySid) {
+        mine = null;
+      }
       if (mine && mine.status === 'approved') {
         state.spectator = true;
         state.watchTargetSid = mine.targetSid;
@@ -877,6 +1034,9 @@ window.PCGameClient = (function () {
 
     /* Observer requests to watch exactly one target (server enforces lock). */
     function requestSpectate(targetSid) {
+      // The host owns dealing + the local bot driver. Letting the host become
+      // an observer would make isHost() false and freeze all bots forever.
+      if (isHost()) { toast('房主不能旁观他人（需主持牌局）'); return; }
       if (state.spectator || state.myRelation) {
         toast('你已锁定旁观一名玩家，无法更改或旁观其他人');
         return;
@@ -952,6 +1112,7 @@ window.PCGameClient = (function () {
       return s ? s.nickname : '玩家';
     };
     self.rankName = rankName;
+    self.nextLevelFrom = advanceLevel;   // exposed for level-progression tests
     self.cardsLabel = cardsLabel;
     self.remainingOf = remainingOf;
     self.diagText = diagText;         // export bot behaviour trace for the UI
@@ -979,7 +1140,7 @@ window.PCGameClient = (function () {
         state.result.partnerSid = repl(state.result.partnerSid);
         (state.result.ranks || []).forEach(function (r) { r.sid = repl(r.sid); r.isMe = r.sid === newSid; });
       }
-      if (state._passEchoSig) state._passEchoSig = state._passEchoSig.replace(old, newSid);
+      state._myPassPending = 0;   // sid migration: any in-flight pass echo is stale now
       state.mySeat = seatOfSid(newSid);
       dlog('SID-MIGRATE', old + ' -> ' + newSid + ' host=' + state.hostSid + ' turn=' + state.turn + ' phase=' + state.phase);
       onUpdate(state);

@@ -31,6 +31,10 @@ const config = {
   apiPrefix: process.env.PC_API_PREFIX || '/pc/api',
   wsPath: process.env.PC_WS_PATH || '/pc/ws',
   serverUrl: process.env.PC_SERVER_URL || 'https://flshw.online',
+  // Only trust X-Forwarded-For for rate limiting when an explicit trusted
+  // reverse proxy is in front of us; otherwise clients can spoof it at will.
+  trustProxy: (process.env.PC_TRUST_PROXY || '') === '1',
+  maxWsConnections: envInt('PC_MAX_WS_CONNECTIONS', 200),
   hardMaxMembers: envInt('PC_HARD_MAX_MEMBERS', 20),
   maxRoomsPerUser: envInt('PC_QUOTA_ROOMS', 3),
   tlsCert: process.env.PC_TLS_CERT || '',

@@ -8,7 +8,9 @@
   var $ = function (id) { return document.getElementById(id); };
   var state = {
     config: null, offsetMs: 0, uk: null, mySid: null,
-    seq: 0, serverTs: 0, joined: false, messages: [], expired: false
+    seq: 0, serverTs: 0, joined: false, messages: [], expired: false,
+    mySids: {},          // all session sids this user has held (reconnect migration)
+    msgKeys: {}          // dedupe key for history replay after WSS reconnect
   };
   var net = null, media = null, countdown = null, game = null;
   var entering = false;
@@ -173,7 +175,9 @@
       if (!ok) { status('gate-status', '成员身份校验失败，已拒绝进入', 'err'); net.close(); return; }
       var prevSid = state.mySid;                 // may be old sid on a reconnect
       var resumedMatch = chatReady && game && game.state && game.state.phase === 'playing';
+      if (prevSid) state.mySids[prevSid] = true;  // keep old sids for "mine" attribution on replay
       state.mySid = f.sessionId;
+      state.mySids[f.sessionId] = true;
       state.serverTs = f.serverTime;
       state.offsetMs = f.serverTime - Date.now();
       state.joined = true;
@@ -220,6 +224,17 @@
     map[codes.KEY_INVALID] = '密钥校验失败';
     var msg = map[f.code] || ('服务器错误：' + f.code);
     if (console.warn) console.warn('[PCDIAG] SERVER-ERROR code=' + f.code + ' msg=' + msg + ' localSeq=' + state.seq);
+    // SEQ RESYNC: every MSG rejection above happens BEFORE the server advances
+    // its seq, and the server now echoes its last confirmed seq as `ackSeq`.
+    // Align to it so a single rate-limit / wrap race cannot poison the session
+    // into permanent E_REPLAY (the old build only toasted and drifted forever).
+    if (f.ackSeq != null && state.joined && typeof f.ackSeq === 'number') {
+      var ack = Math.max(0, Math.floor(f.ackSeq));
+      if (ack !== state.seq) {
+        if (console.info) console.info('[PCDIAG] SEQ-RESYNC ' + state.seq + ' -> ' + ack + ' code=' + f.code);
+        state.seq = ack;
+      }
+    }
     // Surface seq desync loudly: the old build only toasted briefly, so a bot
     // freeze caused by E_REPLAY looked like "机器人不出牌" with no clue.
     if (f.code === codes.REPLAY && state.joined) {
@@ -241,7 +256,20 @@
     var envSig = frameSig || env.sig;
     var envSenderPub = frameSenderPub || env.senderPub;
     var sender = PCMembers.get(env.senderSid);
-    var senderPub = sender ? sender.ukPub : envSenderPub;
+    // SECURITY: a message may only be verified with a public key we trust.
+    // Two trusted sources: (1) the RK-signed live member table; (2) our OWN UK
+    // for old sid messages we authored before a reconnect (we hold the key).
+    // Never fall back to a pubkey carried in the frame/DB — a malicious server
+    // could otherwise forge a message under any senderSid with its own key.
+    var isMyOld = !sender && !!state.mySids[env.senderSid];
+    var senderPub;
+    if (sender) senderPub = sender.ukPub;
+    else if (isMyOld) senderPub = state.uk && state.uk.publicPem;
+    if (!senderPub) {
+      if (console.warn) console.warn('[PCDIAG] MSG-DROP unverified sender=' + env.senderSid +
+        ' kind=' + env.kind + ' seq=' + env.seq);
+      return;
+    }
     var mySid = state.mySid;
     var text;
     try {
@@ -271,9 +299,17 @@
       }
       return;
     }
-    var mine = env.senderSid === state.mySid;
+    // Dedupe chat messages by (senderSid, seq). On a WSS reconnect the server
+    // replays the whole history; without this every line renders twice. Game
+    // frames are intentionally excluded (their echo drives the state machine).
+    var dkey = env.senderSid + '|' + env.seq;
+    if (state.msgKeys[dkey]) return;
+    state.msgKeys[dkey] = true;
+    // A message I sent under any of my session sids (current or pre-reconnect)
+    // is mine — otherwise replayed history would show my own words as others'.
+    var mine = !!state.mySids[env.senderSid];
     state.messages.push({
-      ts: env.ts, who: sender ? sender.nickname : (env.meta && env.meta.nickname) || '成员',
+      ts: env.ts, who: sender ? sender.nickname : (mine ? (savedNickname() || '我') : (env.meta && env.meta.nickname) || '成员'),
       text: text, mine: mine
     });
     appendMessage(state.messages[state.messages.length - 1], env.kind, text);
@@ -477,7 +513,7 @@
     game = null;
     chatReady = false;
     state.joined = false; state.mySid = null; state.seq = 0; state.uk = null;
-    state.messages = []; entering = false;
+    state.messages = []; state.msgKeys = {}; state.mySids = {}; entering = false;
     $('messages').innerHTML = '';
     $('input').value = ''; $('input').disabled = false; $('btn-send').disabled = false;
     var gp = $('game-panel'); if (gp) gp.classList.add('hidden');

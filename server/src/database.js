@@ -103,6 +103,7 @@ class Database {
     this.logger = logger || (() => {});
     this.dirty = false;
     this.flushTimer = null;
+    this.maxFlushTimer = null;
   }
 
   async init() {
@@ -112,11 +113,22 @@ class Database {
     fs.mkdirSync(SHARES_DIR, { recursive: true });
     if (fs.existsSync(DB_FILE)) {
       try { this.db = new SQL.Database(fs.readFileSync(DB_FILE)); }
-      catch (e) { this.logger('数据库损坏，已重建: ' + e.message); this.db = new SQL.Database(); }
+      catch (e) {
+        // NEVER silently lose a corrupt DB. Keep a timestamped copy so an
+        // operator can recover, and start a fresh one only after backup.
+        const bak = DB_FILE + '.corrupt-' + Date.now();
+        try { fs.copyFileSync(DB_FILE, bak); } catch (_) {}
+        this.logger('⚠ 数据库损坏，已备份到 ' + bak + ' 并重建空库: ' + e.message);
+        this.db = new SQL.Database();
+      }
     } else {
       this.db = new SQL.Database();
     }
     this.db.run(SCHEMA);
+    // Guarantee a periodic flush even under continuous writes (debounce alone
+    // can postpone the write forever and lose everything on a crash).
+    this.maxFlushTimer = setInterval(() => this.flush(), 2000);
+    if (this.maxFlushTimer.unref) this.maxFlushTimer.unref();
     return this;
   }
 
@@ -131,12 +143,16 @@ class Database {
     const bytes = Buffer.from(this.db.export());
     const tmp = DB_FILE + '.tmp';
     fs.writeFileSync(tmp, bytes, { mode: 0o600 });
+    // Keep one rollback copy of the last known-good state before swapping in
+    // the new export, so a crash mid-write can never lose both versions.
+    try { if (fs.existsSync(DB_FILE)) fs.copyFileSync(DB_FILE, DB_FILE + '.bak'); } catch (_) {}
     fs.renameSync(tmp, DB_FILE);
     this.dirty = false;
   }
 
   close() {
     if (this.flushTimer) clearTimeout(this.flushTimer);
+    if (this.maxFlushTimer) clearInterval(this.maxFlushTimer);
     this.flush();
     if (this.db) this.db.close();
     this.db = null;
@@ -191,7 +207,9 @@ class Database {
   roomsByOwner(ownerId) { return this.all('SELECT * FROM rooms WHERE owner_id=? ORDER BY created_at DESC', [ownerId]); }
   activeRooms() { return this.all("SELECT * FROM rooms WHERE status IN ('issued','active')"); }
   roomsNeedingCleanup(now) {
-    return this.all("SELECT * FROM rooms WHERE status IN ('issued','active','destroying') AND expires_at<=?", [now]);
+    // Include revoked rooms so legacy revoked rows (which older builds left
+    // with ciphertext intact) are eventually destroyed entirely.
+    return this.all("SELECT * FROM rooms WHERE status IN ('issued','active','destroying','revoked') AND expires_at<=?", [now]);
   }
   createRoom(r) {
     this.run(`INSERT INTO rooms(id,owner_id,name,status,ttl_seconds,max_members,created_at,issued_at,expires_at,
@@ -253,6 +271,14 @@ class Database {
 
   /* Full cascade delete of a room's content + ciphertext. */
   destroyRoom(id) {
+    this.purgeRoomContent(id);
+    this.run('DELETE FROM rooms WHERE id=?', [id]);
+  }
+
+  /* Delete only a room's ciphertext/content, KEEPING the rooms row (so its
+   * status/revoke_at remain queryable as 'invalid'). Used by revoke(), which
+   * must not leave old messages/files behind forever. */
+  purgeRoomContent(id) {
     const files = this.all('SELECT blob_path FROM files WHERE room_id=?', [id]);
     for (const f of files) {
       try { if (f.blob_path && fs.existsSync(f.blob_path)) fs.unlinkSync(f.blob_path); }
@@ -260,7 +286,6 @@ class Database {
     }
     this.run('DELETE FROM files WHERE room_id=?', [id]);
     this.run('DELETE FROM messages WHERE room_id=?', [id]);
-    this.run('DELETE FROM rooms WHERE id=?', [id]);
   }
 }
 

@@ -23,9 +23,10 @@ function sha256(s) { return nodeCrypto.createHash('sha256').update(String(s)).di
 function codePath(hash) { return path.join(SHARES_DIR, hash + '.html'); }
 
 class Shares {
-  constructor(db, logger) {
+  constructor(db, logger, keys) {
     this.db = db;
     this.logger = logger || (() => {});
+    this.keys = keys || null;
     if (!fs.existsSync(SHARES_DIR)) fs.mkdirSync(SHARES_DIR, { recursive: true });
   }
 
@@ -41,7 +42,10 @@ class Shares {
       const code = nodeCrypto.randomBytes(18).toString('base64url'); // 144-bit
       const hash = sha256(code);
       fs.writeFileSync(codePath(hash), html, { mode: 0o600 });
-      this.db.addShare(hash, code, roomId, edition, now);
+      // Store the bearer code ENCRYPTED; DB-only leaks cannot reveal all
+      // rooms' share links. Legacy plaintext rows are still readable.
+      const stored = this.keys ? this.keys.encryptSecret(code) : code;
+      this.db.addShare(hash, stored, roomId, edition, now);
       out[edition] = {
         code: code,
         path: config.publicPrefix + '/s/' + code,
@@ -63,6 +67,14 @@ class Shares {
     const file = codePath(hash);
     if (!fs.existsSync(file)) return null;
     return { roomId: row.room_id, edition: row.edition, html: fs.readFileSync(file, 'utf8') };
+  }
+
+  /* Decrypted share codes for the owner's portal view. */
+  codesByRoom(roomId) {
+    return this.db.sharesByRoom(roomId).map(row => ({
+      edition: row.edition,
+      code: this.keys ? this.keys.decryptSecret(row.code) : row.code
+    }));
   }
 
   /* Delete all share codes + cached HTML for a room. */

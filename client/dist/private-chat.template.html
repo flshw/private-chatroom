@@ -468,7 +468,12 @@ window.PCCrypto = (function () {
     var K = unwrapKey(envelope.wraps[mySid], ukPrivatePem);
     var aad = envelope.roomId + '|' + envelope.senderSid + '|' + envelope.seq + '|' + envelope.ts + '|' + envelope.kind;
     var plain = aesDecrypt(K, aad, envelope.iv, envelope.ct, envelope.tag);
-    var verifyWith = senderUkPub || senderPub;
+    // SECURITY: the sender public key MUST come from the RK-signed member
+    // table (passed by the caller). Never fall back to a key carried inside
+    // the frame/DB — a malicious server could then forge a message under any
+    // senderSid using its own key and this check would still pass.
+    var verifyWith = senderUkPub;
+    if (!verifyWith) throw new Error('消息发送者身份未验证：不在已签名成员表');
     if (!verifySig(root.PCProtocol.signedPart(envelope), sig, verifyWith)) {
       throw new Error('消息签名校验失败');
     }
@@ -501,6 +506,30 @@ window.PCConfig = (function () {
     return PCCrypto.verifySig(config, sig, sskPem);
   }
 
+  /* SECURITY: pin the set of known platform SSK public-key fingerprints.
+   * The config block is signed by SSK, but its own `serverPubKey` field is
+   * part of the signed data — using it alone to verify the signature is a
+   * self-referential trust anchor: an attacker who rewrites the config could
+   * swap in their own key and re-sign. We therefore also require the key's
+   * SPKI/SHA-256 fingerprint to be in this code-baked allowlist. To bypass,
+   * an attacker must edit the JS itself (the known limit of single-file
+   * file:// distribution), not merely tamper with the injected config JSON.
+   * UPDATE: when rotating the platform SSK, append the new fingerprint here. */
+  var KNOWN_SSK_FP = [
+    'e45b5c64269ef1ad', // production platform SSK
+    '2089a8803bb0411a'  // local dev SSK
+  ];
+
+  function sskFingerprint(pem) {
+    try {
+      var pub = PCCrypto.pemToPublic(pem);
+      var der = window.forge.asn1.toDer(window.forge.pki.publicKeyToAsn1(pub)).getBytes();
+      var md = window.forge.md.sha256.create();
+      md.update(der, 'binary');
+      return md.digest().toHex().slice(0, 16).toLowerCase();
+    } catch (e) { return ''; }
+  }
+
   /* Returns Promise<{ok, config, error, offsetMs}>. Fails closed on any error. */
   async function load() {
     var config = window.__PC_CONFIG__;
@@ -510,6 +539,10 @@ window.PCConfig = (function () {
     if (!/BEGIN PUBLIC KEY/.test(config.roomPubKey || '') ||
         !/BEGIN PUBLIC KEY/.test(config.serverPubKey || '')) {
       return { ok: false, error: '配置缺少公钥，已停止连接' };
+    }
+    var fp = sskFingerprint(config.serverPubKey);
+    if (!fp || KNOWN_SSK_FP.indexOf(fp) === -1) {
+      return { ok: false, error: '服务器签名公钥不受信任（指纹 ' + (fp || '无效') + '），已停止连接' };
     }
     var valid = false;
     try { valid = verify(config, sig, config.serverPubKey); }
@@ -553,8 +586,9 @@ window.PCConfig = (function () {
 window.PCMembers = (function () {
   var table = new Map();   // sid -> {sid, nickname, ukPub, selfSig}
   var version = 0;
+  var epoch = null;        // server process epoch; change => version baseline resets
 
-  function reset() { table = new Map(); version = 0; }
+  function reset() { table = new Map(); version = 0; epoch = null; }
 
   function all() {
     return Array.from(table.values());
@@ -564,8 +598,16 @@ window.PCMembers = (function () {
 
   async function verifyList(memberList, memberListSig, roomPubKeyPem) {
     if (!memberList || !Array.isArray(memberList.members)) return false;
+    // A server restart resets memberVersion to 1. If the (RK-signed) epoch
+    // changed, compare versions against 0 so the fresh low version is accepted
+    // — otherwise online clients would reject every list and lock up until F5.
+    // Lists without epoch are treated as legacy (strict check). NOTE: we only
+    // COMPUTE the baseline here; apply() commits epoch/version after signatures
+    // verify, so a forged list cannot poison our version state.
+    var baseVersion = version;
+    if (memberList.epoch != null && memberList.epoch !== epoch) baseVersion = 0;
     // 3) monotonic version
-    if (!(memberList.version > version)) return false;
+    if (!(memberList.version > baseVersion)) return false;
     // 1) RK signature over canonical memberList
     var listOk = false;
     try { listOk = await PCCrypto.verifySig(memberList, memberListSig, roomPubKeyPem); }
@@ -592,6 +634,7 @@ window.PCMembers = (function () {
       table.set(m.sid, { sid: m.sid, nickname: m.nickname, ukPub: m.ukPub, selfSig: m.selfSig });
     }
     version = memberList.version;
+    if (memberList.epoch != null) epoch = memberList.epoch;
     return true;
   }
 
@@ -1019,7 +1062,9 @@ window.PCMedia = function (ctx) {
   var $ = function (id) { return document.getElementById(id); };
   var state = {
     config: null, offsetMs: 0, uk: null, mySid: null,
-    seq: 0, serverTs: 0, joined: false, messages: [], expired: false
+    seq: 0, serverTs: 0, joined: false, messages: [], expired: false,
+    mySids: {},          // all session sids this user has held (reconnect migration)
+    msgKeys: {}          // dedupe key for history replay after WSS reconnect
   };
   var net = null, media = null, countdown = null, game = null;
   var entering = false;
@@ -1184,7 +1229,9 @@ window.PCMedia = function (ctx) {
       if (!ok) { status('gate-status', '成员身份校验失败，已拒绝进入', 'err'); net.close(); return; }
       var prevSid = state.mySid;                 // may be old sid on a reconnect
       var resumedMatch = chatReady && game && game.state && game.state.phase === 'playing';
+      if (prevSid) state.mySids[prevSid] = true;  // keep old sids for "mine" attribution on replay
       state.mySid = f.sessionId;
+      state.mySids[f.sessionId] = true;
       state.serverTs = f.serverTime;
       state.offsetMs = f.serverTime - Date.now();
       state.joined = true;
@@ -1231,6 +1278,17 @@ window.PCMedia = function (ctx) {
     map[codes.KEY_INVALID] = '密钥校验失败';
     var msg = map[f.code] || ('服务器错误：' + f.code);
     if (console.warn) console.warn('[PCDIAG] SERVER-ERROR code=' + f.code + ' msg=' + msg + ' localSeq=' + state.seq);
+    // SEQ RESYNC: every MSG rejection above happens BEFORE the server advances
+    // its seq, and the server now echoes its last confirmed seq as `ackSeq`.
+    // Align to it so a single rate-limit / wrap race cannot poison the session
+    // into permanent E_REPLAY (the old build only toasted and drifted forever).
+    if (f.ackSeq != null && state.joined && typeof f.ackSeq === 'number') {
+      var ack = Math.max(0, Math.floor(f.ackSeq));
+      if (ack !== state.seq) {
+        if (console.info) console.info('[PCDIAG] SEQ-RESYNC ' + state.seq + ' -> ' + ack + ' code=' + f.code);
+        state.seq = ack;
+      }
+    }
     // Surface seq desync loudly: the old build only toasted briefly, so a bot
     // freeze caused by E_REPLAY looked like "机器人不出牌" with no clue.
     if (f.code === codes.REPLAY && state.joined) {
@@ -1252,7 +1310,20 @@ window.PCMedia = function (ctx) {
     var envSig = frameSig || env.sig;
     var envSenderPub = frameSenderPub || env.senderPub;
     var sender = PCMembers.get(env.senderSid);
-    var senderPub = sender ? sender.ukPub : envSenderPub;
+    // SECURITY: a message may only be verified with a public key we trust.
+    // Two trusted sources: (1) the RK-signed live member table; (2) our OWN UK
+    // for old sid messages we authored before a reconnect (we hold the key).
+    // Never fall back to a pubkey carried in the frame/DB — a malicious server
+    // could otherwise forge a message under any senderSid with its own key.
+    var isMyOld = !sender && !!state.mySids[env.senderSid];
+    var senderPub;
+    if (sender) senderPub = sender.ukPub;
+    else if (isMyOld) senderPub = state.uk && state.uk.publicPem;
+    if (!senderPub) {
+      if (console.warn) console.warn('[PCDIAG] MSG-DROP unverified sender=' + env.senderSid +
+        ' kind=' + env.kind + ' seq=' + env.seq);
+      return;
+    }
     var mySid = state.mySid;
     var text;
     try {
@@ -1282,9 +1353,17 @@ window.PCMedia = function (ctx) {
       }
       return;
     }
-    var mine = env.senderSid === state.mySid;
+    // Dedupe chat messages by (senderSid, seq). On a WSS reconnect the server
+    // replays the whole history; without this every line renders twice. Game
+    // frames are intentionally excluded (their echo drives the state machine).
+    var dkey = env.senderSid + '|' + env.seq;
+    if (state.msgKeys[dkey]) return;
+    state.msgKeys[dkey] = true;
+    // A message I sent under any of my session sids (current or pre-reconnect)
+    // is mine — otherwise replayed history would show my own words as others'.
+    var mine = !!state.mySids[env.senderSid];
     state.messages.push({
-      ts: env.ts, who: sender ? sender.nickname : (env.meta && env.meta.nickname) || '成员',
+      ts: env.ts, who: sender ? sender.nickname : (mine ? (savedNickname() || '我') : (env.meta && env.meta.nickname) || '成员'),
       text: text, mine: mine
     });
     appendMessage(state.messages[state.messages.length - 1], env.kind, text);
@@ -1488,7 +1567,7 @@ window.PCMedia = function (ctx) {
     game = null;
     chatReady = false;
     state.joined = false; state.mySid = null; state.seq = 0; state.uk = null;
-    state.messages = []; entering = false;
+    state.messages = []; state.msgKeys = {}; state.mySids = {}; entering = false;
     $('messages').innerHTML = '';
     $('input').value = ''; $('input').disabled = false; $('btn-send').disabled = false;
     var gp = $('game-panel'); if (gp) gp.classList.add('hidden');

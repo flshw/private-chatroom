@@ -77,5 +77,45 @@ const hbs = { 0: H('W17 S3'), 1: H('W17 S4') };
 check('两张大王可抗贡', G.canResist(hbs, [0, 1, 0, 1], [0, 1]) === true);
 check('不足两张大王不可抗贡', G.canResist({ 0: H('W17 S3'), 1: H('S4 S5') }, [0, 1, 0, 1], [0, 1]) === false);
 
+/* applyTribute: central 进贡/还贡/抗贡 resolution */
+{
+  const teams = [0, 1, 0, 1];
+  // Single-down: 大科=seat0, 大拉=seat3. seat3 must pay its biggest card (大王 r17)
+  // to seat0, and seat0 returns its smallest card (a 3).
+  const hands = [
+    H('S3 H4 D5'),            // seat0 winner
+    H('S6 H7 D8'),            // seat1
+    H('S9 H10 D11'),          // seat2
+    H('S12 H13 W17')          // seat3 loser, biggest = 大王
+  ];
+  const before = hands.map(h => h.length);
+  const tr = G.applyTribute(hands, [0, 1, 2, 3], teams, 15);
+  check('单下: 大拉向大科进贡一张', tr.events.some(e => e.action === 'tribute' && e.from === 3 && e.to === 0 && e.card.r === 17), JSON.stringify(tr.events));
+  check('单下: 大科还贡一张小牌', tr.events.some(e => e.action === 'return' && e.from === 0 && e.to === 3 && e.card.r === 3), JSON.stringify(tr.events));
+  check('进贡还贡后各家张数不变', tr.hands.every((h, i) => h.length === before[i]), JSON.stringify(tr.hands.map(h => h.length)));
+  check('单下首出为大科(seat0)', tr.firstSeat === 0, 'first=' + tr.firstSeat);
+  check('进贡牌确实离开输家手牌', !tr.hands[3].some(c => c.r === 17), JSON.stringify(tr.hands[3]));
+}
+{
+  const teams = [0, 1, 0, 1];
+  // Double-down (team0 top two): both losers pay. If the losing side holds both
+  // big jokers they resist and NO cards change hands.
+  // finishOrder [0,2,1,3]: team0 (seat0,seat2) wins double; losers = seat1,seat3.
+  const h4 = [H('S3 H4'), H('W17 S9'), H('S5 H6'), H('W17 S10')];
+  const tr = G.applyTribute(h4, [0, 2, 1, 3], teams, 15);
+  check('双下+输家双大王 => 抗贡成功', tr.resisted === true && tr.events.some(e => e.action === 'resist'), JSON.stringify(tr.events));
+  check('抗贡时不发生进贡', !tr.events.some(e => e.action === 'tribute'), JSON.stringify(tr.events));
+  check('抗贡时手牌张数不变', tr.hands.every((h, i) => h.length === h4[i].length), 'ok');
+}
+{
+  const teams = [0, 1, 0, 1];
+  // Double-down without jokers: losers seat1 & seat3 each pay biggest to a winner.
+  const h4 = [H('S3 H4'), H('W17 S9'), H('S5 H6'), H('S12 H13')];
+  const tr = G.applyTribute(h4, [0, 2, 1, 3], teams, 15);
+  check('双下: 两名输家都进贡', tr.events.filter(e => e.action === 'tribute').length === 2, JSON.stringify(tr.events));
+  check('双下: 两名赢家都还贡', tr.events.filter(e => e.action === 'return').length === 2, JSON.stringify(tr.events));
+  check('双下首出为进贡方(seat3)', tr.firstSeat === 3, 'first=' + tr.firstSeat);
+}
+
 console.log('\n=== 结果: ' + pass + ' 通过 / ' + fail + ' 失败 ===');
 process.exit(fail ? 1 : 0);

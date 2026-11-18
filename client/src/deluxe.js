@@ -431,8 +431,19 @@ window.PCDeluxe = (function () {
       if (st.pendingForMe) {
         texts.push('🔔 ' + (st.pendingForMe.spectatorNickname || '有人') + ' 请求旁观你的手牌');
       }
-      if (texts.length) { note.classList.remove('hidden'); note.innerHTML = texts.join('<br>'); }
-      else note.classList.add('hidden');
+      // SECURITY: spectatorNickname / tn are user-controlled. Never build this
+      // with innerHTML — a nickname like <svg/onload=...> would become stored
+      // XSS and could read the UK private key from localStorage. Use text nodes.
+      note.textContent = '';
+      if (texts.length) {
+        note.classList.remove('hidden');
+        texts.forEach(function (t, i) {
+          var line = document.createElement('div');
+          if (i) line.style.marginTop = '4px';
+          line.textContent = t;
+          note.appendChild(line);
+        });
+      } else note.classList.add('hidden');
     }
     // Consent buttons for a pending request targeting me.
     renderConsent(st);

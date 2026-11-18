@@ -45,7 +45,7 @@ const st = game.state;
 st.seats = ['s_old', 'bot_1', 'bot_2', 'bot_3'].map(sid => ({ sid, nickname: sid, isBot: sid.indexOf('bot_') === 0, isMe: sid === 's_old' }));
 st.players = ['s_old', 'bot_1', 'bot_2', 'bot_3'];
 st.hostSid = 's_old'; st.phase = 'playing'; st.spectator = false; st.turn = 'bot_2';
-st.lastWinner = 'bot_1'; st.finishOrder = []; st._passEchoSig = '0|s_old';
+st.lastWinner = 'bot_1'; st.finishOrder = []; st._myPassPending = 2;
 st.hand = G.deal(G.makeDeck())[0];
 st.botHands = { bot_1: [], bot_2: [], bot_3: [] };
 const handBefore = st.hand.length;
@@ -63,7 +63,7 @@ check('当前回合未受影响', st.turn === 'bot_2', st.turn);
 check('上家赢家未受影响', st.lastWinner === 'bot_1');
 check('手牌完整保留', st.hand.length === handBefore);
 check('phase仍为playing(未回退idle)', st.phase === 'playing');
-check('_passEchoSig迁移', st._passEchoSig === '0|s_new', st._passEchoSig);
+check('过牌回显计数在重连后清零(旧回显作废)', st._myPassPending === 0, st._myPassPending);
 
 // Idempotent: same sid -> no change
 const changed2 = game.updateMySid('s_new');
