@@ -67,11 +67,20 @@
   function addGroup(groups, g) { if (g) groups.push(g); return !!g; }
 
   /* Arrange a full hand into legal trick-sized groups (auto "理牌").
-   * Returns { groups:[{cards,pattern,label}], singles:n }. */
-  function arrange(hand, level, G) {
+   * Returns { groups:[{cards,pattern,label}], singles:n, tricks, bombs, flushes }.
+   *
+   * v24: two schemes. bombsFirst=true keeps natural bombs / straight flushes /
+   * rocket intact and leads with them (火力集中). bombsFirst=false folds small
+   * cards into long straights / double straights / triple pairs FIRST so the
+   * hand is shed in fewer tricks (少手数), then keeps the big guns. Both emit
+   * only patterns validated by classify(), so neither can produce an illegal
+   * group — and both cover every card exactly once. */
+  function arrangeWith(hand, level, G, opts) {
     G = G || (typeof window !== 'undefined' && window.PCGame);
     if (!G) throw new Error('PCGame engine required');
     level = level || 15;
+    opts = opts || {};
+    var bombsFirst = opts.bombsFirst !== false;
     var pool = hand.slice();
     var groups = [];
 
@@ -79,95 +88,131 @@
       if (!cards.length) return false;
       var g = mk(cards, G, level);
       if (!g) return false;          // never emit an illegal pattern
+      g.label = g.pattern.name;
       groups.push(g);
       pool = without(pool, cards);
       return true;
+    }
+    function takeBombs() {
+      var jokers = pool.filter(function (c) { return c.s === 'W'; });
+      if (jokers.length >= 4) take(jokers.slice(0, 4));
+      var cnt = rankCounts(pool);
+      Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+        var have = pickRank(pool, r, 4);
+        if (have.length === 4) take(have);
+      });
+    }
+    function takeStraightFlushes() {
+      ['S', 'H', 'C', 'D'].forEach(function (suit) {
+        var sc = pool.filter(function (c) { return c.s === suit && c.r >= 3 && c.r <= 14; });
+        consecutiveRuns(sc.map(function (c) { return c.r; }), 5).forEach(function (run) {
+          var cs = [];
+          run.forEach(function (r) { var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c); });
+          take(cs);
+        });
+      });
+    }
+    function takeStraights() {
+      var runs = consecutiveRuns(Object.keys(rankCounts(pool)).map(Number).filter(function (r) {
+        return r >= 3 && r <= 14;
+      }), 5);
+      runs.forEach(function (run) {
+        var cs = [];
+        run.forEach(function (r) { var c = pickRank(pool, r, 1)[0]; if (c) cs.push(c); });
+        take(cs);
+      });
+    }
+    function takeDoubleStraights() {
+      var cnt = rankCounts(pool);
+      var pairRanks = Object.keys(cnt).map(Number).filter(function (r) { return cnt[r] >= 2 && r <= 14; });
+      consecutiveRuns(pairRanks, 3).forEach(function (run) {
+        var cs = [];
+        run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 2)); });
+        take(cs);
+      });
+    }
+    function takeTripleStraights() {
+      var cnt = rankCounts(pool);
+      var tripRanks = Object.keys(cnt).map(Number).filter(function (r) { return cnt[r] >= 3 && r <= 14; });
+      consecutiveRuns(tripRanks, 2).forEach(function (run) {
+        var cs = [];
+        run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 3)); });
+        take(cs);
+      });
+    }
+    function takeTriplePairs() {
+      var guard = 0;
+      while (guard++ < 14) {
+        var c = rankCounts(pool);
+        var trips = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 3 && r <= 15; })
+          .sort(function (a, b) { return a - b; });
+        var pairs = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 2 && r <= 15; })
+          .sort(function (a, b) { return a - b; });
+        var done = false;
+        for (var t = 0; t < trips.length && !done; t++) {
+          for (var p = 0; p < pairs.length; p++) {
+            if (pairs[p] === trips[t]) continue;
+            var three = pickRank(pool, trips[t], 3), two = pickRank(pool, pairs[p], 2);
+            if (three.length === 3 && two.length === 2 && take(three.concat(two))) { done = true; break; }
+          }
+        }
+        if (!done) break;
+      }
+    }
+    function takeRest() {
+      var cnt = rankCounts(pool);
+      Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+        if (cnt[r] >= 2) take(pickRank(pool, r, 2));
+      });
+      cnt = rankCounts(pool);
+      Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+        if (cnt[r] >= 3) take(pickRank(pool, r, 3));
+      });
+      pool.forEach(function (c) { take([c]); });
     }
 
     // 1) Rocket (all four jokers) — strongest, always kept.
     var jokers = pool.filter(function (c) { return c.s === 'W'; });
     if (jokers.length >= 4) take(jokers.slice(0, 4));
-
-    // 2) Natural bombs (4 of one rank) — never break them up.
-    var cnt = rankCounts(pool);
-    Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-      var have = pickRank(pool, r, 4);
-      if (have.length === 4) take(have);
-    });
-
-    // 3) Straight flushes (same suit, 5+ consecutive 3..A) before plain runs.
-    ['S', 'H', 'C', 'D'].forEach(function (suit) {
-      var sc = pool.filter(function (c) { return c.s === suit && c.r >= 3 && c.r <= 14; });
-      consecutiveRuns(sc.map(function (c) { return c.r; }), 5).forEach(function (run) {
-        var cs = [];
-        run.forEach(function (r) { var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c); });
-        take(cs);
-      });
-    });
-
-    // 4) Plain straights (5+ consecutive ranks; one card per rank).
-    var runs = consecutiveRuns(Object.keys(rankCounts(pool)).map(Number).filter(function (r) {
-      return r >= 3 && r <= 14;
-    }), 5);
-    runs.forEach(function (run) {
-      var cs = [];
-      run.forEach(function (r) { var c = pickRank(pool, r, 1)[0]; if (c) cs.push(c); });
-      take(cs);
-    });
-
-    // 5) Double straights (3+ consecutive pairs) — fold loose pairs away.
-    var cnt5 = rankCounts(pool);
-    var pairRanks = Object.keys(cnt5).map(Number).filter(function (r) { return cnt5[r] >= 2 && r <= 14; });
-    consecutiveRuns(pairRanks, 3).forEach(function (run) {
-      var cs = [];
-      run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 2)); });
-      take(cs);
-    });
-
-    // 6) Triple straights / 钢板 (2+ consecutive triples).
-    var cnt6 = rankCounts(pool);
-    var tripRanks = Object.keys(cnt6).map(Number).filter(function (r) { return cnt6[r] >= 3 && r <= 14; });
-    consecutiveRuns(tripRanks, 2).forEach(function (run) {
-      var cs = [];
-      run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 3)); });
-      take(cs);
-    });
-
-    // 7) Triple-with-pair (三带二): use the LOWEST available pair as kicker to
-    //    shed small singles. Repeat while possible.
-    var guard = 0;
-    while (guard++ < 14) {
-      var c = rankCounts(pool);
-      var trips = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 3 && r <= 15; })
-        .sort(function (a, b) { return a - b; });
-      var pairs = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 2 && r <= 15; })
-        .sort(function (a, b) { return a - b; });
-      var done = false;
-      for (var t = 0; t < trips.length && !done; t++) {
-        for (var p = 0; p < pairs.length; p++) {
-          if (pairs[p] === trips[t]) continue;
-          var three = pickRank(pool, trips[t], 3), two = pickRank(pool, pairs[p], 2);
-          if (three.length === 3 && two.length === 2 && take(three.concat(two))) { done = true; break; }
-        }
-      }
-      if (!done) break;
+    if (bombsFirst) {
+      // 火力集中: bombs & straight flushes first, then fold the remainder.
+      takeBombs(); takeStraightFlushes(); takeStraights();
+      takeDoubleStraights(); takeTripleStraights(); takeTriplePairs(); takeRest();
+    } else {
+      // 少手数: long runs & straight flushes first to shed many cards with one
+      // trick, THEN keep bombs intact. Small cards get absorbed into runs.
+      takeStraightFlushes(); takeStraights(); takeDoubleStraights();
+      takeTripleStraights(); takeTriplePairs(); takeBombs(); takeRest();
     }
-
-    // 8) Remaining pairs, then triples, then single cards.
-    var cnt8 = rankCounts(pool);
-    Object.keys(cnt8).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-      if (cnt8[r] >= 2) take(pickRank(pool, r, 2));
-    });
-    var cnt9 = rankCounts(pool);
-    Object.keys(cnt9).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-      if (cnt9[r] >= 3) take(pickRank(pool, r, 3));
-    });
-    pool.forEach(function (c) { take([c]); });
-
     return {
       groups: groups,
-      singles: groups.filter(function (g) { return g.pattern.type === 1; }).length
+      singles: groups.filter(function (g) { return g.pattern.type === G.TYPE.SINGLE; }).length,
+      tricks: groups.length,
+      bombs: groups.filter(function (g) {
+        return g.pattern.type === G.TYPE.BOMB || g.pattern.type === G.TYPE.ROCKET ||
+          g.pattern.type === G.TYPE.STFLUSH;
+      }).length,
+      flushes: groups.filter(function (g) { return g.pattern.type === G.TYPE.STFLUSH; }).length
     };
+  }
+
+  function arrange(hand, level, G) { return arrangeWith(hand, level, G, { bombsFirst: true }); }
+
+  /* Two auto-arrange schemes for the cycle button: { name, order, groups, stats }.
+   * `order` is a flattened hand order; `groups` carries pattern labels for the
+   * UI to show each combo as a labelled stack. */
+  function arrangeSchemes(hand, level, G) {
+    var a = arrangeWith(hand, level, G, { bombsFirst: true });
+    var b = arrangeWith(hand, level, G, { bombsFirst: false });
+    function flat(arr) {
+      var out = [];
+      arr.groups.forEach(function (g) { g.cards.forEach(function (c) { out.push(c); }); });
+      return out;
+    }
+    return [
+      { name: '理牌① 火力集中', order: flat(a), groups: a.groups, stats: a },
+      { name: '理牌② 少手数', order: flat(b), groups: b.groups, stats: b }
+    ];
   }
 
   /* Flatten an arrangement back into a display order (理牌后的手牌顺序). */
@@ -352,8 +397,31 @@
 
   function isBomb(g) { return !!BOMB_WEIGHT[g.pattern.type]; }
 
-  /* Decide a move. ctx: { hand, tablePattern (null when leading), level }.
-   * Returns { cards, pattern, name } to play, or null to PASS. */
+  /* v24 strategy helpers.
+   * handPower(): rough role estimate — bombs + big jokers + level cards.
+   *   >= 6 → 主攻 (attacker: shed fast, grab control), else 助攻 (support:
+   *   play safe, avoid stealing partner's trick).
+   * Every decision here is a HEURISTIC on WHICH legal card to play. It never
+   * introduces an illegal play, and it only ever passes when the caller has
+   * supplied explicit table context AND a partner is winning the trick. */
+  function handPower(hand, level, G) {
+    var cnt = rankCounts(hand), power = 0;
+    Object.keys(cnt).map(Number).forEach(function (r) {
+      if (cnt[r] >= 4) power += 3;
+      if (r === 17) power += 2;
+      if (r === 16) power += 1;
+      if (r === level) power += 1;
+    });
+    if (G && G.isWild && hand.some(function (c) { return G.isWild(c, level); })) power += 2;
+    return power;
+  }
+
+  /* Decide a move. ctx: { hand, tablePattern (null when leading), level,
+   *   mySid, bySid (who played the trick), teamOf(sid)->team index,
+   *   remaining(sid)->card count }.
+   * Returns { cards, pattern, name, why } to play, or null to PASS.
+   * Backward compatible: with only hand/tablePattern/level it NEVER passes
+   * while a legal beat exists (the verify-follow invariant). */
   function chooseMove(ctx, G) {
     G = G || (typeof window !== 'undefined' && window.PCGame);
     if (!G) throw new Error('PCGame engine required');
@@ -362,30 +430,82 @@
     var cands = candidates(ctx.hand, level, G);
     if (!cands.length) return null;
 
+    var power = handPower(ctx.hand, level, G);
+    var attacker = power >= 6;
+    var teamOf = typeof ctx.teamOf === 'function' ? ctx.teamOf : null;
+    var mySid = ctx.mySid, bySid = ctx.bySid;
+
     if (!table) {
-      // Lead: 情况不明，对子先行 — otherwise shed the most cards cheaply.
-      var pairs = cands.filter(function (g) { return g.pattern.type === G.TYPE.PAIR && !isBomb(g); });
-      var pool = pairs.length ? pairs : cands.filter(function (g) { return !isBomb(g); });
+      // ---- LEAD ----
+      // 有鬼打一张: holding a big joker, probe with the LOWEST single so the
+      // partner can read the signal and opponents waste a small card.
+      var bigJoker = ctx.hand.some(function (c) { return c.r === 17; });
+      var singles = cands.filter(function (g) {
+        return g.pattern.type === G.TYPE.SINGLE && !isBomb(g);
+      });
+      if (bigJoker && singles.length) {
+        singles.sort(function (a, b) { return a.pattern.rank - b.pattern.rank; });
+        var probe = singles[0];
+        return { cards: probe.cards, pattern: probe.pattern, name: probe.pattern.name,
+          why: '有鬼打一张(探路)' };
+      }
+      var pool = cands.filter(function (g) { return !isBomb(g); });
       if (!pool.length) pool = cands;
-      pool.sort(function (a, b) {
+      if (attacker) {
+        // 主攻: shed the most cards per trick, lowest rank first (减手数).
+        pool.sort(function (a, b) {
+          return b.cards.length - a.cards.length || a.pattern.rank - b.pattern.rank;
+        });
+        var lead = pool[0];
+        return { cards: lead.cards, pattern: lead.pattern, name: lead.pattern.name,
+          why: '主攻·多牌快出' };
+      }
+      // 助攻 / 情况不明: 对子先行 — lowest pair, else lowest combo.
+      var pairs = pool.filter(function (g) { return g.pattern.type === G.TYPE.PAIR; });
+      var safe = pairs.length ? pairs : pool;
+      safe.sort(function (a, b) {
         return a.pattern.rank - b.pattern.rank || b.cards.length - a.cards.length;
       });
-      var lead = pool[0];
-      return { cards: lead.cards, pattern: lead.pattern, name: lead.pattern.name };
+      var lead2 = safe[0];
+      return { cards: lead2.cards, pattern: lead2.pattern, name: lead2.pattern.name,
+        why: pairs.length ? '助攻·对子先行' : '助攻·最小跟牌' };
     }
 
+    // ---- FOLLOW ----
     var answers = cands.filter(function (g) { return G.canBeat(g.pattern, table, level); });
     if (!answers.length) return null;   // cannot beat -> pass
-    // Smallest legal answer first; among equals prefer shedding more cards;
-    // bombs are sorted last (hold the big guns back) unless they are the only
-    // legal answer, which the filter above already guarantees is acceptable.
-    answers.sort(function (a, b) {
-      return (BOMB_WEIGHT[a.pattern.type] || 0) - (BOMB_WEIGHT[b.pattern.type] || 0) ||
-        a.pattern.rank - b.pattern.rank || b.cards.length - a.cards.length;
+    var normal = answers.filter(function (g) { return !isBomb(g); });
+    var bombs = answers.filter(isBomb);
+
+    // Only a bomb can win. Partner is currently taking the trick → don't
+    // bomb your own side. Requires explicit table context (never in the
+    // standalone verify-follow test, so its invariant is preserved).
+    if (!normal.length && bombs.length && teamOf && bySid && mySid && bySid !== mySid &&
+        teamOf(bySid) === teamOf(mySid)) {
+      return null; // 配合队友：不炸对家
+    }
+    // Opponent is nearly out (<= 2 cards) and we must bomb to stop them:
+    // whether we're attacker or support, block NOW rather than hold back.
+    var blocking = false;
+    if (!normal.length && typeof ctx.remaining === 'function' && teamOf && bySid && mySid &&
+        teamOf(bySid) !== teamOf(mySid) && ctx.remaining(bySid) <= 2) {
+      blocking = true;
+    }
+    var usable = normal.length ? normal : bombs;
+    usable.sort(function (a, b) {
+      // bombs: smallest bomb first (小炸及时用); blocking uses it regardless.
+      return a.pattern.rank - b.pattern.rank ||
+        (isBomb(a) ? a.pattern.type - b.pattern.type : 0) ||
+        b.cards.length - a.cards.length;
     });
-    var best = answers[0];
-    return { cards: best.cards, pattern: best.pattern, name: best.pattern.name };
+    var best = usable[0];
+    var why = normal.length ? '最小即可压' : (blocking ? '拦牌·及时炸' : '大炸沉住气/唯一可压');
+    return { cards: best.cards, pattern: best.pattern, name: best.pattern.name, why: why };
   }
 
-  return { arrange: arrange, sortedHand: sortedHand, candidates: candidates, chooseMove: chooseMove };
+  return {
+    arrange: arrange, arrangeWith: arrangeWith, arrangeSchemes: arrangeSchemes,
+    sortedHand: sortedHand, candidates: candidates, chooseMove: chooseMove,
+    handPower: handPower
+  };
 });

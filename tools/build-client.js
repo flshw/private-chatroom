@@ -128,7 +128,7 @@ const deluxeMarkers = baseMarkers.concat([
   ['选座面板', 'id="game-setup"'],
   ['选人弹窗遮罩', 'id="game-setup-mask"'],
   ['自动预选规则', 'membersList.length === 4'],
-  ['底部出牌按钮', 'class="game-bottom"'],
+  ['理牌与出牌同排', 'class="game-bottom"'],
   ['出牌统计', 'state.played.push('],
   ['手牌同类堆叠', "className = 'pcard-stack'"],
   ['纵向扇形堆叠', 'stepY * (g.cards.length - 1))'],
@@ -137,7 +137,8 @@ const deluxeMarkers = baseMarkers.concat([
   ['单张可选', 'function toggleOne(c)'],
   ['牌面角标花色', "corner.className = 'pip'"],
   ['出牌区居中', '.game-table{width:min(100%,560px)'],
-  ['文字提示区悬浮左侧中间', '.game-log{position:absolute;left:16px;top:50%'],
+  ['文字提示区悬浮左侧中间', '.game-log{position:absolute;left:16px;top:59%'],
+  ['牌局动态下移不重叠', '.game-log{position:absolute;left:16px;top:59%'],
   ['游戏浮层透出聊天', 'pointer-events:none}'],
   ['记牌器放大', 'font-size:15px;color:var(--ink)'],
   ['过牌始终可点', 'btnPass.disabled = !inPlay'],
@@ -165,8 +166,9 @@ const deluxeMarkers = baseMarkers.concat([
   ['onPlay最终必推进回合', 'then ALWAYS advance the'],
   ['空手牌机器人顺延', 'Turn landed on a cardless bot'],
   ['自动理牌按钮', 'id="btn-game-arrange"'],
-  ['平铺切换按钮', 'id="btn-game-spread"'],
-  ['理牌按点数降序', 'sortHandForView: sortHandForView'],
+  ['理牌循环三方案', 'arrangeMode = (arrangeMode + 1) % 3'],
+  ['理牌方案生成', 'function arrangeSchemes(hand, level, G)'],
+  ['理牌方案按组合堆叠', 'st.arrangeGroups'],
   ['理牌UI用点数排序', 'return window.PCGame.sortHandForView(cards, st.level)'],
   ['掼蛋引擎', 'root.PCGame = api'],
   ['机器人引擎', 'root.PCBots = api'],
@@ -216,7 +218,7 @@ const deluxeMarkers = baseMarkers.concat([
   /* Mobile / touch adaptation — keep these fixes from regressing on rebuild. */
   ['移动顶栏两行布局', 'grid-template-areas:"name meta . exit" "game voice mem ."'],
   ['移动手牌可滚到首尾', 'justify-content:safe center'],
-  ['移动按钮44px触控', '.game-actions .tool-btn,.game-bottom .tool-btn{min-height:44px'],
+  ['移动按钮44px触控', '.game-bottom .tool-btn{min-height:44px'],
   ['全双工语音状态按钮', 'id="btn-voice-live"'],
   ['录音状态反馈', 'b.classList.toggle(\'recording\', rec)'],
   ['触摸无粘滞悬停', '@media(hover:hover)'],
@@ -244,7 +246,8 @@ const deluxeMarkers = baseMarkers.concat([
   ['过牌座位标记', "state.seatPlays[by] = { cards: [], passed: true }"],
   ['低牌数显示', "'剩 ' + left + ' 张'"],
   ['每堆全选按钮', "className = 'stack-all'"],
-  ['框选开关', "id=\"btn-game-marquee\""],
+  ['框选常驻开启', "hand.classList.add('marquee-on')"],
+  ['框选按钮已移除', html => html.indexOf('id="btn-game-marquee"') === -1],
   ['框选实现', 'function initMarquee()'],
   ['框选覆盖层样式', '.hand-marquee{position:absolute'],
   ['结算面板样式', '#game-settle-mask{position:fixed'],
@@ -289,7 +292,21 @@ const deluxeMarkers = baseMarkers.concat([
    * partner (opposite seat), never the next player on the right. */
   ['2牌力规则', 'a plain 2 is the smallest card when not playing 2'],
   ['接风对家领出', 'leadAfterWinner'],
-  ['接风队友座位', 'state.seats[(i + 2) % 4]']
+  ['接风队友座位', 'state.seats[(i + 2) % 4]'],
+  /* v24: tip removed, diag in topbar, smarter bots, two arrange schemes,
+   * box-select always on and arrange/pass/play on ONE row. */
+  ['牌桌提示已删除', html => html.indexOf('同类牌纵向叠放') === -1],
+  ['诊断按钮在顶栏时间旁', html => {
+    var meta = html.indexOf('id="remain"'), diag = html.indexOf('id="btn-game-diag"');
+    return meta > -1 && diag > meta && html.indexOf('id="game-panel"') > diag;
+  }],
+  ['机器人主攻助攻策略', 'function handPower(hand, level, G)'],
+  ['机器人有鬼打一张', '有鬼打一张(探路)'],
+  ['机器人配合队友不炸对家', '配合队友：不炸对家'],
+  ['机器人拦牌及时炸', '拦牌·及时炸'],
+  ['机器人策略诊断字段', 'move.why'],
+  ['组合标签堆叠显示', "'stack-label'"],
+  ['平铺模式按钮文案', "r.mode === 2 ? '↔ 平铺'"]
 ]);
 build('豪华版', deluxeParts, deluxeMarkers, 'client/dist/private-chat-deluxe.template.html');
 

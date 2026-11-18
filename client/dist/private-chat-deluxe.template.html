@@ -125,6 +125,13 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
 /* Full-duplex voice is audio-only; the top-bar button shows call status
  * (class "on"). No PiP video window exists in this build. */
 
+/* v24: diagnostic button lives in the top bar next to the clock/status.
+ * Keep it visually compact so it doesn't crowd the room name or exit button. */
+.top-meta #btn-game-diag{border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+  border-radius:8px;padding:3px 7px;margin-left:8px;font-size:12px;cursor:pointer;white-space:nowrap}
+.top-meta #btn-game-diag:hover{border-color:var(--brand)}
+.top-meta #btn-game-diag.on{border-color:var(--ok);color:var(--ok)}
+
 /* Voice live indicators. */
 .voice-dot{display:inline-flex;align-items:center;gap:5px;font-size:11px}
 .voice-dot i{width:7px;height:7px;border-radius:50%;background:#44506f;display:inline-block}
@@ -224,10 +231,12 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   .pcard-stack>.pcard:hover{transform:translateY(-9px);z-index:90!important}
 }
 
-.game-actions{display:flex;gap:8px;justify-content:center;padding-bottom:4px;flex-wrap:wrap}
-/* Text hint / play log floats at the LEFT-CENTRE as a compact card. */
-.game-log{position:absolute;left:16px;top:50%;transform:translateY(-50%);z-index:6;
-  width:224px;max-height:46vh;overflow-y:scroll;overflow-x:hidden;color:var(--ink);font-size:12.5px;line-height:1.7;
+/* v24: one single control row — 理牌(循环) / 过牌 / 出牌. */
+.game-bottom{display:flex;gap:10px;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
+.game-bottom .tool-btn{min-width:92px;text-align:center}
+.game-bottom #btn-game-arrange{flex:1.15 1 0}
+.game-log{position:absolute;left:16px;top:59%;transform:translateY(-50%);z-index:6;
+  width:224px;max-height:40vh;overflow-y:scroll;overflow-x:hidden;color:var(--ink);font-size:12.5px;line-height:1.7;
   border:1px solid var(--line);border-radius:12px;padding:10px 12px;
   background:rgba(10,16,34,.5);box-shadow:var(--shadow);
   scrollbar-width:thin;scrollbar-color:rgba(91,140,255,.55) rgba(255,255,255,.05)}
@@ -238,8 +247,6 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
 .game-log::-webkit-scrollbar-track{background:rgba(255,255,255,.05);border-radius:4px}
 .game-log::-webkit-scrollbar-thumb{background:rgba(91,140,255,.55);border-radius:4px}
 .game-log::-webkit-scrollbar-thumb:hover{background:rgba(91,140,255,.85)}
-.game-bottom{display:flex;gap:10px;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
-.game-bottom .tool-btn{min-width:92px;text-align:center}
 
 /* ---------- Mobile / touch adaptation (deluxe only, <=720px) ---------- */
 @media(max-width:720px){
@@ -303,12 +310,10 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
    * scrolling (plain `center` clips the leading cards out of scroll range). */
   .my-hand{justify-content:safe center;gap:7px;padding:22px 8px 8px;max-height:132px;min-height:92px;
     -webkit-overflow-scrolling:touch}
-  .game-actions{gap:6px}
-  .game-actions>span{display:none}
-  /* 44px minimum touch target for every game control. */
-  .game-actions .tool-btn,.game-bottom .tool-btn{min-height:44px;font-size:13px}
-  .game-bottom{gap:8px;padding-top:6px}
-  .game-bottom .tool-btn{min-width:0;flex:1 1 0}
+  /* 44px minimum touch target for every game control (arrange/pass/play in
+   * the SAME bottom row after v24). */
+  .game-bottom{gap:6px;padding-top:6px}
+  .game-bottom .tool-btn{min-height:44px;font-size:13px;min-width:0;flex:1 1 0}
   /* Settlement modal fits a narrow phone; seats keep the distinct play row. */
   #game-settle{min-width:0;width:92vw;padding:14px;max-height:86vh;overflow:auto}
   .settle-title{font-size:16px}
@@ -352,7 +357,7 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
       "seats   seats"
       "table   log"
       "hand    log"
-      "actions bottom";
+      "bottom  bottom";
     background:linear-gradient(180deg,rgba(9,14,28,.99),rgba(9,14,28,.985) 55%,rgba(9,14,28,.99))}
 
   /* Counter: one scrollable row instead of two wrapped rows. */
@@ -392,13 +397,10 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     overflow:auto;z-index:auto}
   .game-log:before{font-size:11px;margin-bottom:4px;padding-bottom:4px}
 
-  /* Arrange/flatten (left) and Pass/Play (right) share ONE 44px row. */
-  .game-actions{grid-area:actions;justify-content:flex-start;align-items:stretch;
-    gap:6px;padding:0;margin:0;flex-wrap:nowrap}
-  .game-actions>span{display:none}
+  /* v24: one full-width bottom row — 理牌(循环)/过牌/出牌 side by side. */
   .game-bottom{grid-area:bottom;gap:6px;padding:0;margin:0;border:0;align-items:stretch}
-  .game-actions .tool-btn,.game-bottom .tool-btn{min-height:44px;min-width:0;
-    font-size:12px;padding:6px 10px;flex:1 1 0}
+  .game-bottom .tool-btn{min-height:44px;min-width:0;
+    font-size:12px;padding:6px 8px;flex:1 1 0}
 
   /* Modals must fit the short height. */
   #game-setup{padding:12px;gap:8px;max-height:92vh;overflow:auto}
@@ -452,6 +454,10 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   border:1px solid var(--brand2);background:rgba(20,27,46,.95);color:#c9bdff;
   border-radius:6px;padding:1px 5px;font-size:9px;cursor:pointer;white-space:nowrap}
 .pcard-stack .stack-all:hover{border-color:var(--brand);color:#fff}
+/* v24: combo-name badge (炸弹/顺子/同花顺…) shown above a 理牌 scheme stack. */
+.pcard-stack .stack-label{position:absolute;left:0;top:-15px;z-index:96;
+  color:#ffcf7a;font-size:9px;font-weight:700;white-space:nowrap;pointer-events:none;
+  text-shadow:0 1px 3px rgba(0,0,0,.85)}
 .my-hand{padding-bottom:24px}
 /* Marquee (drag box-select) overlay inside the hand row. */
 .hand-marquee{position:absolute;border:1px dashed var(--brand);
@@ -500,7 +506,7 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   <canvas id="scene3d"></canvas>
   <header class="topbar">
     <div class="room-name"><span class="dot"></span><span id="room-name">私密聊天</span><span class="deluxe-badge">豪华版</span></div>
-    <div class="top-meta"><span id="remain">—</span> · <span id="member-count">—</span></div>
+    <div class="top-meta"><span id="remain">—</span> · <span id="member-count">—</span><button class="icon" id="btn-game-diag" title="查看机器人行为诊断日志">🐞 诊断</button></div>
     <button class="tool-btn" id="btn-game" disabled>🃏 掼蛋</button>
     <button class="tool-btn" id="btn-voice-live">🎧 全双工语音</button>
     <button class="icon" id="btn-members" title="成员列表">成员</button>
@@ -531,16 +537,10 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
     </div>
     <div class="game-seats" id="game-seats"></div>
     <div class="game-table" id="game-table"><div class="tip">点击「掼蛋」选择玩家后开局</div></div>
-    <div class="my-hand" id="my-hand"></div>
-    <div class="game-actions">
-      <button class="tool-btn" id="btn-game-arrange" title="按掼蛋理牌习惯重新归类手牌">🀄 自动理牌</button>
-      <button class="tool-btn" id="btn-game-spread" title="切换堆叠/平铺显示">↔ 平铺</button>
-      <button class="tool-btn" id="btn-game-marquee" title="拖拽框选多张牌（再点一次关闭）">▧ 框选</button>
-      <button class="tool-btn" id="btn-game-diag" title="查看机器人完整行为日志（排查不出牌）">🐞 诊断</button>
-      <span style="font-size:11px;color:var(--muted)">同类牌纵向叠放·点单张/下方「全选」选牌·或框选 · 出牌 · 全程端到端加密</span>
-    </div>
     <div class="game-log" id="game-log"></div>
+    <div class="my-hand" id="my-hand"></div>
     <div class="game-bottom">
+      <button class="tool-btn" id="btn-game-arrange" title="循环切换理牌方案（炸弹优先 / 手数最少 / 平铺）">🀄 理牌</button>
       <button class="tool-btn" id="btn-game-pass">过牌</button>
       <button class="tool-btn" id="btn-game-play">出牌</button>
     </div>
@@ -2031,11 +2031,20 @@ window.PCMedia = function (ctx) {
   function addGroup(groups, g) { if (g) groups.push(g); return !!g; }
 
   /* Arrange a full hand into legal trick-sized groups (auto "理牌").
-   * Returns { groups:[{cards,pattern,label}], singles:n }. */
-  function arrange(hand, level, G) {
+   * Returns { groups:[{cards,pattern,label}], singles:n, tricks, bombs, flushes }.
+   *
+   * v24: two schemes. bombsFirst=true keeps natural bombs / straight flushes /
+   * rocket intact and leads with them (火力集中). bombsFirst=false folds small
+   * cards into long straights / double straights / triple pairs FIRST so the
+   * hand is shed in fewer tricks (少手数), then keeps the big guns. Both emit
+   * only patterns validated by classify(), so neither can produce an illegal
+   * group — and both cover every card exactly once. */
+  function arrangeWith(hand, level, G, opts) {
     G = G || (typeof window !== 'undefined' && window.PCGame);
     if (!G) throw new Error('PCGame engine required');
     level = level || 15;
+    opts = opts || {};
+    var bombsFirst = opts.bombsFirst !== false;
     var pool = hand.slice();
     var groups = [];
 
@@ -2043,95 +2052,131 @@ window.PCMedia = function (ctx) {
       if (!cards.length) return false;
       var g = mk(cards, G, level);
       if (!g) return false;          // never emit an illegal pattern
+      g.label = g.pattern.name;
       groups.push(g);
       pool = without(pool, cards);
       return true;
+    }
+    function takeBombs() {
+      var jokers = pool.filter(function (c) { return c.s === 'W'; });
+      if (jokers.length >= 4) take(jokers.slice(0, 4));
+      var cnt = rankCounts(pool);
+      Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+        var have = pickRank(pool, r, 4);
+        if (have.length === 4) take(have);
+      });
+    }
+    function takeStraightFlushes() {
+      ['S', 'H', 'C', 'D'].forEach(function (suit) {
+        var sc = pool.filter(function (c) { return c.s === suit && c.r >= 3 && c.r <= 14; });
+        consecutiveRuns(sc.map(function (c) { return c.r; }), 5).forEach(function (run) {
+          var cs = [];
+          run.forEach(function (r) { var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c); });
+          take(cs);
+        });
+      });
+    }
+    function takeStraights() {
+      var runs = consecutiveRuns(Object.keys(rankCounts(pool)).map(Number).filter(function (r) {
+        return r >= 3 && r <= 14;
+      }), 5);
+      runs.forEach(function (run) {
+        var cs = [];
+        run.forEach(function (r) { var c = pickRank(pool, r, 1)[0]; if (c) cs.push(c); });
+        take(cs);
+      });
+    }
+    function takeDoubleStraights() {
+      var cnt = rankCounts(pool);
+      var pairRanks = Object.keys(cnt).map(Number).filter(function (r) { return cnt[r] >= 2 && r <= 14; });
+      consecutiveRuns(pairRanks, 3).forEach(function (run) {
+        var cs = [];
+        run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 2)); });
+        take(cs);
+      });
+    }
+    function takeTripleStraights() {
+      var cnt = rankCounts(pool);
+      var tripRanks = Object.keys(cnt).map(Number).filter(function (r) { return cnt[r] >= 3 && r <= 14; });
+      consecutiveRuns(tripRanks, 2).forEach(function (run) {
+        var cs = [];
+        run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 3)); });
+        take(cs);
+      });
+    }
+    function takeTriplePairs() {
+      var guard = 0;
+      while (guard++ < 14) {
+        var c = rankCounts(pool);
+        var trips = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 3 && r <= 15; })
+          .sort(function (a, b) { return a - b; });
+        var pairs = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 2 && r <= 15; })
+          .sort(function (a, b) { return a - b; });
+        var done = false;
+        for (var t = 0; t < trips.length && !done; t++) {
+          for (var p = 0; p < pairs.length; p++) {
+            if (pairs[p] === trips[t]) continue;
+            var three = pickRank(pool, trips[t], 3), two = pickRank(pool, pairs[p], 2);
+            if (three.length === 3 && two.length === 2 && take(three.concat(two))) { done = true; break; }
+          }
+        }
+        if (!done) break;
+      }
+    }
+    function takeRest() {
+      var cnt = rankCounts(pool);
+      Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+        if (cnt[r] >= 2) take(pickRank(pool, r, 2));
+      });
+      cnt = rankCounts(pool);
+      Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
+        if (cnt[r] >= 3) take(pickRank(pool, r, 3));
+      });
+      pool.forEach(function (c) { take([c]); });
     }
 
     // 1) Rocket (all four jokers) — strongest, always kept.
     var jokers = pool.filter(function (c) { return c.s === 'W'; });
     if (jokers.length >= 4) take(jokers.slice(0, 4));
-
-    // 2) Natural bombs (4 of one rank) — never break them up.
-    var cnt = rankCounts(pool);
-    Object.keys(cnt).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-      var have = pickRank(pool, r, 4);
-      if (have.length === 4) take(have);
-    });
-
-    // 3) Straight flushes (same suit, 5+ consecutive 3..A) before plain runs.
-    ['S', 'H', 'C', 'D'].forEach(function (suit) {
-      var sc = pool.filter(function (c) { return c.s === suit && c.r >= 3 && c.r <= 14; });
-      consecutiveRuns(sc.map(function (c) { return c.r; }), 5).forEach(function (run) {
-        var cs = [];
-        run.forEach(function (r) { var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c); });
-        take(cs);
-      });
-    });
-
-    // 4) Plain straights (5+ consecutive ranks; one card per rank).
-    var runs = consecutiveRuns(Object.keys(rankCounts(pool)).map(Number).filter(function (r) {
-      return r >= 3 && r <= 14;
-    }), 5);
-    runs.forEach(function (run) {
-      var cs = [];
-      run.forEach(function (r) { var c = pickRank(pool, r, 1)[0]; if (c) cs.push(c); });
-      take(cs);
-    });
-
-    // 5) Double straights (3+ consecutive pairs) — fold loose pairs away.
-    var cnt5 = rankCounts(pool);
-    var pairRanks = Object.keys(cnt5).map(Number).filter(function (r) { return cnt5[r] >= 2 && r <= 14; });
-    consecutiveRuns(pairRanks, 3).forEach(function (run) {
-      var cs = [];
-      run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 2)); });
-      take(cs);
-    });
-
-    // 6) Triple straights / 钢板 (2+ consecutive triples).
-    var cnt6 = rankCounts(pool);
-    var tripRanks = Object.keys(cnt6).map(Number).filter(function (r) { return cnt6[r] >= 3 && r <= 14; });
-    consecutiveRuns(tripRanks, 2).forEach(function (run) {
-      var cs = [];
-      run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 3)); });
-      take(cs);
-    });
-
-    // 7) Triple-with-pair (三带二): use the LOWEST available pair as kicker to
-    //    shed small singles. Repeat while possible.
-    var guard = 0;
-    while (guard++ < 14) {
-      var c = rankCounts(pool);
-      var trips = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 3 && r <= 15; })
-        .sort(function (a, b) { return a - b; });
-      var pairs = Object.keys(c).map(Number).filter(function (r) { return c[r] >= 2 && r <= 15; })
-        .sort(function (a, b) { return a - b; });
-      var done = false;
-      for (var t = 0; t < trips.length && !done; t++) {
-        for (var p = 0; p < pairs.length; p++) {
-          if (pairs[p] === trips[t]) continue;
-          var three = pickRank(pool, trips[t], 3), two = pickRank(pool, pairs[p], 2);
-          if (three.length === 3 && two.length === 2 && take(three.concat(two))) { done = true; break; }
-        }
-      }
-      if (!done) break;
+    if (bombsFirst) {
+      // 火力集中: bombs & straight flushes first, then fold the remainder.
+      takeBombs(); takeStraightFlushes(); takeStraights();
+      takeDoubleStraights(); takeTripleStraights(); takeTriplePairs(); takeRest();
+    } else {
+      // 少手数: long runs & straight flushes first to shed many cards with one
+      // trick, THEN keep bombs intact. Small cards get absorbed into runs.
+      takeStraightFlushes(); takeStraights(); takeDoubleStraights();
+      takeTripleStraights(); takeTriplePairs(); takeBombs(); takeRest();
     }
-
-    // 8) Remaining pairs, then triples, then single cards.
-    var cnt8 = rankCounts(pool);
-    Object.keys(cnt8).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-      if (cnt8[r] >= 2) take(pickRank(pool, r, 2));
-    });
-    var cnt9 = rankCounts(pool);
-    Object.keys(cnt9).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) {
-      if (cnt9[r] >= 3) take(pickRank(pool, r, 3));
-    });
-    pool.forEach(function (c) { take([c]); });
-
     return {
       groups: groups,
-      singles: groups.filter(function (g) { return g.pattern.type === 1; }).length
+      singles: groups.filter(function (g) { return g.pattern.type === G.TYPE.SINGLE; }).length,
+      tricks: groups.length,
+      bombs: groups.filter(function (g) {
+        return g.pattern.type === G.TYPE.BOMB || g.pattern.type === G.TYPE.ROCKET ||
+          g.pattern.type === G.TYPE.STFLUSH;
+      }).length,
+      flushes: groups.filter(function (g) { return g.pattern.type === G.TYPE.STFLUSH; }).length
     };
+  }
+
+  function arrange(hand, level, G) { return arrangeWith(hand, level, G, { bombsFirst: true }); }
+
+  /* Two auto-arrange schemes for the cycle button: { name, order, groups, stats }.
+   * `order` is a flattened hand order; `groups` carries pattern labels for the
+   * UI to show each combo as a labelled stack. */
+  function arrangeSchemes(hand, level, G) {
+    var a = arrangeWith(hand, level, G, { bombsFirst: true });
+    var b = arrangeWith(hand, level, G, { bombsFirst: false });
+    function flat(arr) {
+      var out = [];
+      arr.groups.forEach(function (g) { g.cards.forEach(function (c) { out.push(c); }); });
+      return out;
+    }
+    return [
+      { name: '理牌① 火力集中', order: flat(a), groups: a.groups, stats: a },
+      { name: '理牌② 少手数', order: flat(b), groups: b.groups, stats: b }
+    ];
   }
 
   /* Flatten an arrangement back into a display order (理牌后的手牌顺序). */
@@ -2316,8 +2361,31 @@ window.PCMedia = function (ctx) {
 
   function isBomb(g) { return !!BOMB_WEIGHT[g.pattern.type]; }
 
-  /* Decide a move. ctx: { hand, tablePattern (null when leading), level }.
-   * Returns { cards, pattern, name } to play, or null to PASS. */
+  /* v24 strategy helpers.
+   * handPower(): rough role estimate — bombs + big jokers + level cards.
+   *   >= 6 → 主攻 (attacker: shed fast, grab control), else 助攻 (support:
+   *   play safe, avoid stealing partner's trick).
+   * Every decision here is a HEURISTIC on WHICH legal card to play. It never
+   * introduces an illegal play, and it only ever passes when the caller has
+   * supplied explicit table context AND a partner is winning the trick. */
+  function handPower(hand, level, G) {
+    var cnt = rankCounts(hand), power = 0;
+    Object.keys(cnt).map(Number).forEach(function (r) {
+      if (cnt[r] >= 4) power += 3;
+      if (r === 17) power += 2;
+      if (r === 16) power += 1;
+      if (r === level) power += 1;
+    });
+    if (G && G.isWild && hand.some(function (c) { return G.isWild(c, level); })) power += 2;
+    return power;
+  }
+
+  /* Decide a move. ctx: { hand, tablePattern (null when leading), level,
+   *   mySid, bySid (who played the trick), teamOf(sid)->team index,
+   *   remaining(sid)->card count }.
+   * Returns { cards, pattern, name, why } to play, or null to PASS.
+   * Backward compatible: with only hand/tablePattern/level it NEVER passes
+   * while a legal beat exists (the verify-follow invariant). */
   function chooseMove(ctx, G) {
     G = G || (typeof window !== 'undefined' && window.PCGame);
     if (!G) throw new Error('PCGame engine required');
@@ -2326,32 +2394,84 @@ window.PCMedia = function (ctx) {
     var cands = candidates(ctx.hand, level, G);
     if (!cands.length) return null;
 
+    var power = handPower(ctx.hand, level, G);
+    var attacker = power >= 6;
+    var teamOf = typeof ctx.teamOf === 'function' ? ctx.teamOf : null;
+    var mySid = ctx.mySid, bySid = ctx.bySid;
+
     if (!table) {
-      // Lead: 情况不明，对子先行 — otherwise shed the most cards cheaply.
-      var pairs = cands.filter(function (g) { return g.pattern.type === G.TYPE.PAIR && !isBomb(g); });
-      var pool = pairs.length ? pairs : cands.filter(function (g) { return !isBomb(g); });
+      // ---- LEAD ----
+      // 有鬼打一张: holding a big joker, probe with the LOWEST single so the
+      // partner can read the signal and opponents waste a small card.
+      var bigJoker = ctx.hand.some(function (c) { return c.r === 17; });
+      var singles = cands.filter(function (g) {
+        return g.pattern.type === G.TYPE.SINGLE && !isBomb(g);
+      });
+      if (bigJoker && singles.length) {
+        singles.sort(function (a, b) { return a.pattern.rank - b.pattern.rank; });
+        var probe = singles[0];
+        return { cards: probe.cards, pattern: probe.pattern, name: probe.pattern.name,
+          why: '有鬼打一张(探路)' };
+      }
+      var pool = cands.filter(function (g) { return !isBomb(g); });
       if (!pool.length) pool = cands;
-      pool.sort(function (a, b) {
+      if (attacker) {
+        // 主攻: shed the most cards per trick, lowest rank first (减手数).
+        pool.sort(function (a, b) {
+          return b.cards.length - a.cards.length || a.pattern.rank - b.pattern.rank;
+        });
+        var lead = pool[0];
+        return { cards: lead.cards, pattern: lead.pattern, name: lead.pattern.name,
+          why: '主攻·多牌快出' };
+      }
+      // 助攻 / 情况不明: 对子先行 — lowest pair, else lowest combo.
+      var pairs = pool.filter(function (g) { return g.pattern.type === G.TYPE.PAIR; });
+      var safe = pairs.length ? pairs : pool;
+      safe.sort(function (a, b) {
         return a.pattern.rank - b.pattern.rank || b.cards.length - a.cards.length;
       });
-      var lead = pool[0];
-      return { cards: lead.cards, pattern: lead.pattern, name: lead.pattern.name };
+      var lead2 = safe[0];
+      return { cards: lead2.cards, pattern: lead2.pattern, name: lead2.pattern.name,
+        why: pairs.length ? '助攻·对子先行' : '助攻·最小跟牌' };
     }
 
+    // ---- FOLLOW ----
     var answers = cands.filter(function (g) { return G.canBeat(g.pattern, table, level); });
     if (!answers.length) return null;   // cannot beat -> pass
-    // Smallest legal answer first; among equals prefer shedding more cards;
-    // bombs are sorted last (hold the big guns back) unless they are the only
-    // legal answer, which the filter above already guarantees is acceptable.
-    answers.sort(function (a, b) {
-      return (BOMB_WEIGHT[a.pattern.type] || 0) - (BOMB_WEIGHT[b.pattern.type] || 0) ||
-        a.pattern.rank - b.pattern.rank || b.cards.length - a.cards.length;
+    var normal = answers.filter(function (g) { return !isBomb(g); });
+    var bombs = answers.filter(isBomb);
+
+    // Only a bomb can win. Partner is currently taking the trick → don't
+    // bomb your own side. Requires explicit table context (never in the
+    // standalone verify-follow test, so its invariant is preserved).
+    if (!normal.length && bombs.length && teamOf && bySid && mySid && bySid !== mySid &&
+        teamOf(bySid) === teamOf(mySid)) {
+      return null; // 配合队友：不炸对家
+    }
+    // Opponent is nearly out (<= 2 cards) and we must bomb to stop them:
+    // whether we're attacker or support, block NOW rather than hold back.
+    var blocking = false;
+    if (!normal.length && typeof ctx.remaining === 'function' && teamOf && bySid && mySid &&
+        teamOf(bySid) !== teamOf(mySid) && ctx.remaining(bySid) <= 2) {
+      blocking = true;
+    }
+    var usable = normal.length ? normal : bombs;
+    usable.sort(function (a, b) {
+      // bombs: smallest bomb first (小炸及时用); blocking uses it regardless.
+      return a.pattern.rank - b.pattern.rank ||
+        (isBomb(a) ? a.pattern.type - b.pattern.type : 0) ||
+        b.cards.length - a.cards.length;
     });
-    var best = answers[0];
-    return { cards: best.cards, pattern: best.pattern, name: best.pattern.name };
+    var best = usable[0];
+    var why = normal.length ? '最小即可压' : (blocking ? '拦牌·及时炸' : '大炸沉住气/唯一可压');
+    return { cards: best.cards, pattern: best.pattern, name: best.pattern.name, why: why };
   }
 
-  return { arrange: arrange, sortedHand: sortedHand, candidates: candidates, chooseMove: chooseMove };
+  return {
+    arrange: arrange, arrangeWith: arrangeWith, arrangeSchemes: arrangeSchemes,
+    sortedHand: sortedHand, candidates: candidates, chooseMove: chooseMove,
+    handPower: handPower
+  };
 });
 
 </script>
@@ -2406,6 +2526,7 @@ window.PCGameClient = (function () {
     var botThinkMs = 1400;               // slower: give a human a clear window to tap 过牌/出牌 before the bot grabs the turn
     var botWatchdog = null;              // safety net: re-drive a bot if its move never advances the turn
     var BOT_WATCHDOG_MS = 5000;          // > botThinkMs + one E2EE round trip; only fires on a stuck turn
+    var arrangeMode = 0;                 // v24: 0/1 = 两种理牌方案, 2 = 平铺(点数序)
 
     /* --- Bot behaviour diagnostics ---------------------------------------
      * A separate, timestamped trace of the whole bot driver: scheduling,
@@ -2465,6 +2586,7 @@ window.PCGameClient = (function () {
       hostSid: null,
       partnerSid: null,             // 对家 (teammate) chosen at deal time
       hand: [],                       // my cards
+      arrangeGroups: null,            // v24: current 理牌 scheme's labelled combos
       table: null,                    // {cards, type, bySid}
       lastWinner: null,
       passes: 0,
@@ -2717,6 +2839,7 @@ window.PCGameClient = (function () {
       state.lastWinner = null; state._myPassPending = 0;
       state.finishOrder = []; state.log = []; state.played = [];
       state.result = null; state.seatPlays = {}; state.playedBySeat = {};   // fresh round
+      state.arrangeGroups = null; arrangeMode = 0;   // reset 理牌 cycle each deal
       if (msg.partner) state.partnerSid = msg.partner;
       state.botHands = state.botHands || {};
       if (msg.order && msg.order.length === 4) state.players = msg.order.slice();
@@ -3095,12 +3218,17 @@ window.PCGameClient = (function () {
       var move = null;
       try {
         move = window.PCBots.chooseMove({
-          hand: hand, tablePattern: state.tablePattern || null, level: state.level
+          hand: hand, tablePattern: state.tablePattern || null, level: state.level,
+          mySid: sid,
+          bySid: (state.table && state.table.bySid) || null,
+          teamOf: function (s) { return seatOfSid(s) % 2; }, // sid -> team index
+          remaining: remainingOf
         }, window.PCGame);
       } catch (e) { dlog('DECIDE-ERR', sid + ' | ' + (e && e.message ? e.message : e)); move = null; }
       dlog('DECIDE', sid + ' -> ' + (move
         ? ('PLAY ' + (move.pattern && move.pattern.name ? move.pattern.name : move.pattern.type) +
-           ' cards=' + move.cards.map(function (c) { return rankName(c.r) + (c.s || ''); }).join(','))
+           ' cards=' + move.cards.map(function (c) { return rankName(c.r) + (c.s || ''); }).join(',') +
+           ' | ' + (move.why || ''))
         : 'PASS'));
       try {
         if (!move) {
@@ -3385,24 +3513,38 @@ window.PCGameClient = (function () {
     }
     function requestDeal() { sendGame({ kind: 'deal_request', requestBy: mySid }); }
 
-    /* Auto-arrange my hand using the Guandan grouping strategy (bombs first,
-     * straights/double-straights, triples, pairs, singles; big to small inside
-     * each family). Only the display order of the local hand changes — card
-     * ids and E2EE game data are untouched. */
+    /* v24: auto-arrange cycles through 火力集中 / 少手数 / 平铺(点数序).
+     * Only the LOCAL display order changes — card ids and E2EE game data are
+     * untouched. The button label is returned so the UI can show the mode. */
     function autoArrange() {
-      if (!window.PCBots || !window.PCGame) return false;
+      if (!window.PCBots || !window.PCGame) return null;
       var view = state.spectator ? state.targetHand : state.hand;
-      if (!view || !view.length) return false;
-      var arranged = (window.PCGame && window.PCGame.sortHandForView)
-        ? window.PCGame.sortHandForView(view, state.level)
-        : window.PCBots.sortedHand(view, state.level, window.PCGame);
-      if (state.spectator) state.targetHand = arranged;
-      else state.hand = arranged;
-      note('已自动理牌：同类牌归堆，炸弹/顺子在前');
+      if (!view || !view.length) return null;
+      arrangeMode = (arrangeMode + 1) % 3;
+      var arrangement;
+      if (arrangeMode === 2) {
+        // 平铺: plain rank order (strongest first), no grouping.
+        arrangement = (window.PCGame.sortHandForView)
+          ? { order: window.PCGame.sortHandForView(view, state.level), label: '平铺 · 点数序' }
+          : { order: view.slice(), label: '平铺' };
+      } else {
+        var schemes = window.PCBots.arrangeSchemes(view, state.level, window.PCGame);
+        var s = schemes[arrangeMode] || schemes[0];
+        arrangement = { order: s.order, label: s.name };
+        // Record the grouping so the UI can label each combo stack.
+        state.arrangeGroups = s.groups.map(function (g) {
+          return { name: g.pattern.name, ids: g.cards.map(function (c) { return c.id; }) };
+        });
+      }
+      if (arrangeMode === 2) state.arrangeGroups = null;
+      if (state.spectator) state.targetHand = arrangement.order;
+      else state.hand = arrangement.order;
+      note('已' + arrangement.label + '（仅本机显示顺序，牌局数据不变）');
       onUpdate(state);
-      return true;
+      return { mode: arrangeMode, label: arrangement.label };
     }
 
+    self.arrangeMode = function () { return arrangeMode; };
     self.state = state;
     self.onMessage = onMessage;
     self.syncSeats = syncSeats;
@@ -3597,8 +3739,8 @@ window.PCDeluxe = (function () {
   var game = null, ctx = null, selected = {};
   var membersList = [], mySid = null, picked = [], setupOpen = false;
   var partnerPick = null;   // sid of chosen 对家 (teammate)
-  var spread = false; // false = stacked by rank (default), true = flat
-  var marqueeOn = false; // drag box-select mode
+  var spread = false; // false = stacked by rank (default), true = flat (v24: set by 平铺 cycle mode)
+  var marqueeOn = true; // v24: box-select is ALWAYS on (button removed)
   var lastTableSig = ''; // signature of the last rendered table, for play animation
   var settleShownFor = null; // round number whose settlement panel is currently shown
   var $ = function (id) { return document.getElementById(id); };
@@ -3755,6 +3897,9 @@ window.PCDeluxe = (function () {
    * jokers, level card/2, A, K … 3 — same-rank cards stacked together.
    * Uses the engine's deterministic sortHandForView. */
   function arrangedOrder(cards, st) {
+    // v24: when a 理牌 scheme is active, render by its combos (see renderHand),
+    // so simply preserve the order the scheme produced.
+    if (st && st.arrangeGroups && st.arrangeGroups.length && cards.length) return cards.slice();
     if (window.PCGame && window.PCGame.sortHandForView && cards.length) {
       return window.PCGame.sortHandForView(cards, st.level);
     }
@@ -3778,13 +3923,28 @@ window.PCDeluxe = (function () {
     if (!shown.length) return;
     var readonly = false; // spectator feature removed — everyone plays their own hand
     var ordered = arrangedOrder(shown, st);
-    // Group by rank in the arranged order.
+    // v24: when a 理牌 scheme is active, group cards by the scheme's combos
+    // (labelled stacks: 炸弹/顺子/同花顺…); otherwise group by rank as before.
     var groups = [], byRank = {};
-    ordered.forEach(function (c) {
-      var key = c.r;
-      if (!byRank[key]) { byRank[key] = { rank: c.r, cards: [] }; groups.push(byRank[key]); }
-      byRank[key].cards.push(c);
-    });
+    if (st && st.arrangeGroups && st.arrangeGroups.length) {
+      var byId = {};
+      ordered.forEach(function (c) { byId[c.id] = c; });
+      st.arrangeGroups.forEach(function (ag) {
+        var cs = [];
+        ag.ids.forEach(function (id) { if (byId[id]) { cs.push(byId[id]); delete byId[id]; } });
+        if (cs.length) groups.push({ rank: cs[0].r, label: ag.name, cards: cs });
+      });
+      // Safety: any card not covered by a scheme group still gets shown.
+      ordered.forEach(function (c) {
+        if (byId[c.id]) { groups.push({ rank: c.r, label: '', cards: [c] }); delete byId[c.id]; }
+      });
+    } else {
+      ordered.forEach(function (c) {
+        var key = c.r;
+        if (!byRank[key]) { byRank[key] = { rank: c.r, label: '', cards: [] }; groups.push(byRank[key]); }
+        byRank[key].cards.push(c);
+      });
+    }
     function toggleOne(c) {
       return readonly ? null : function (e) {
         if (e) e.stopPropagation();
@@ -3835,7 +3995,15 @@ window.PCDeluxe = (function () {
         el.style.zIndex = String(i + 1);
         stack.appendChild(el);
       });
-      stack.title = (RANK_LABEL[g.rank] || g.rank) + ' × ' + g.cards.length + '（点单张牌可选/取消）';
+      stack.title = (g.label ? g.label + ' · ' : '') +
+        (RANK_LABEL[g.rank] || g.rank) + ' × ' + g.cards.length + '（点单张牌可选/取消）';
+      // v24: show the scheme's combo name (炸弹/顺子/同花顺…) when 理牌 is active.
+      if (g.label) {
+        var lab = document.createElement('span');
+        lab.className = 'stack-label';
+        lab.textContent = g.label;
+        stack.appendChild(lab);
+      }
       // "全选" under each same-rank stack: tap to select/deselect the whole
       // group in one action (the user asked for a per-group select-all).
       if (!readonly) {
@@ -4058,16 +4226,20 @@ window.PCDeluxe = (function () {
 
   function onPassClick() { game.pass(); }
 
+  /* v24: one button cycles 理牌① 火力集中 → 理牌② 少手数 → 平铺 → back.
+   * The engine performs the reorder and reports the label; the button mirrors
+   * it. `spread` (flat render) is on only for the 平铺 mode. */
   function onArrangeClick() {
     if (!game) return;
-    if (!game.autoArrange || !game.autoArrange()) ctx.toast('暂无可整理的手牌');
-    else renderGame(game.state);
-  }
-  function onSpreadClick() {
-    spread = !spread;
-    var b = $('btn-game-spread');
-    if (b) b.textContent = spread ? '⊞ 堆叠' : '↔ 平铺';
-    if (game) renderGame(game.state);
+    var r = game.autoArrange && game.autoArrange();
+    if (!r) { ctx.toast('暂无可整理的手牌'); return; }
+    spread = (r.mode === 2);
+    var b = $('btn-game-arrange');
+    if (b) {
+      b.textContent = r.mode === 2 ? '↔ 平铺' : (r.mode === 0 ? '🀄 理牌① 火力' : '🀄 理牌② 少手');
+      b.title = '当前：' + r.label + ' · 点击循环切换理牌方案';
+    }
+    renderGame(game.state);
   }
 
   function onStartClick() {
@@ -4241,14 +4413,8 @@ window.PCDeluxe = (function () {
     window.addEventListener('pointermove', move, { passive: false });
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
-  }
-  function toggleMarquee() {
-    marqueeOn = !marqueeOn;
-    var hand = $('my-hand');
-    if (hand) hand.classList.toggle('marquee-on', marqueeOn);
-    var b = $('btn-game-marquee');
-    if (b) { b.classList.toggle('on', marqueeOn); b.textContent = marqueeOn ? '▧ 框选·开' : '▧ 框选'; }
-    if (ctx) ctx.toast(marqueeOn ? '框选已开启：在手牌区拖拽画框选牌' : '框选已关闭');
+    // v24: box-select is permanently enabled — no on/off button.
+    hand.classList.add('marquee-on');
   }
 
   function onSettleNext() {
@@ -4262,8 +4428,7 @@ window.PCDeluxe = (function () {
     $('btn-game-play') && $('btn-game-play').addEventListener('click', onPlayClick);
     $('btn-game-pass') && $('btn-game-pass').addEventListener('click', onPassClick);
     $('btn-game-arrange') && $('btn-game-arrange').addEventListener('click', onArrangeClick);
-    $('btn-game-spread') && $('btn-game-spread').addEventListener('click', onSpreadClick);
-    $('btn-game-marquee') && $('btn-game-marquee').addEventListener('click', toggleMarquee);
+    // v24: 平铺/框选 buttons removed — 平铺 is a 理牌 cycle mode, 框选 always on.
     $('btn-game-diag') && $('btn-game-diag').addEventListener('click', openDiag);
     $('btn-diag-close') && $('btn-diag-close').addEventListener('click', closeDiag);
     $('btn-diag-refresh') && $('btn-diag-refresh').addEventListener('click', refreshDiag);

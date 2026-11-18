@@ -30,7 +30,7 @@
   <canvas id="scene3d"></canvas>
   <header class="topbar">
     <div class="room-name"><span class="dot"></span><span id="room-name">私密聊天</span><span class="deluxe-badge">豪华版</span></div>
-    <div class="top-meta"><span id="remain">—</span> · <span id="member-count">—</span></div>
+    <div class="top-meta"><span id="remain">—</span> · <span id="member-count">—</span><button class="icon" id="btn-game-diag" title="查看机器人行为诊断日志">🐞 诊断</button></div>
     <button class="tool-btn" id="btn-game" disabled>🃏 掼蛋</button>
     <button class="tool-btn" id="btn-voice-live">🎧 全双工语音</button>
     <button class="icon" id="btn-members" title="成员列表">成员</button>
@@ -61,16 +61,10 @@
     </div>
     <div class="game-seats" id="game-seats"></div>
     <div class="game-table" id="game-table"><div class="tip">点击「掼蛋」选择玩家后开局</div></div>
-    <div class="my-hand" id="my-hand"></div>
-    <div class="game-actions">
-      <button class="tool-btn" id="btn-game-arrange" title="按掼蛋理牌习惯重新归类手牌">🀄 自动理牌</button>
-      <button class="tool-btn" id="btn-game-spread" title="切换堆叠/平铺显示">↔ 平铺</button>
-      <button class="tool-btn" id="btn-game-marquee" title="拖拽框选多张牌（再点一次关闭）">▧ 框选</button>
-      <button class="tool-btn" id="btn-game-diag" title="查看机器人完整行为日志（排查不出牌）">🐞 诊断</button>
-      <span style="font-size:11px;color:var(--muted)">同类牌纵向叠放·点单张/下方「全选」选牌·或框选 · 出牌 · 全程端到端加密</span>
-    </div>
     <div class="game-log" id="game-log"></div>
+    <div class="my-hand" id="my-hand"></div>
     <div class="game-bottom">
+      <button class="tool-btn" id="btn-game-arrange" title="循环切换理牌方案（炸弹优先 / 手数最少 / 平铺）">🀄 理牌</button>
       <button class="tool-btn" id="btn-game-pass">过牌</button>
       <button class="tool-btn" id="btn-game-play">出牌</button>
     </div>

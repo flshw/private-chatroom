@@ -21,6 +21,13 @@ BASE_STYLES_PLACEHOLDER
 /* Full-duplex voice is audio-only; the top-bar button shows call status
  * (class "on"). No PiP video window exists in this build. */
 
+/* v24: diagnostic button lives in the top bar next to the clock/status.
+ * Keep it visually compact so it doesn't crowd the room name or exit button. */
+.top-meta #btn-game-diag{border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+  border-radius:8px;padding:3px 7px;margin-left:8px;font-size:12px;cursor:pointer;white-space:nowrap}
+.top-meta #btn-game-diag:hover{border-color:var(--brand)}
+.top-meta #btn-game-diag.on{border-color:var(--ok);color:var(--ok)}
+
 /* Voice live indicators. */
 .voice-dot{display:inline-flex;align-items:center;gap:5px;font-size:11px}
 .voice-dot i{width:7px;height:7px;border-radius:50%;background:#44506f;display:inline-block}
@@ -120,10 +127,12 @@ BASE_STYLES_PLACEHOLDER
   .pcard-stack>.pcard:hover{transform:translateY(-9px);z-index:90!important}
 }
 
-.game-actions{display:flex;gap:8px;justify-content:center;padding-bottom:4px;flex-wrap:wrap}
-/* Text hint / play log floats at the LEFT-CENTRE as a compact card. */
-.game-log{position:absolute;left:16px;top:50%;transform:translateY(-50%);z-index:6;
-  width:224px;max-height:46vh;overflow-y:scroll;overflow-x:hidden;color:var(--ink);font-size:12.5px;line-height:1.7;
+/* v24: one single control row — 理牌(循环) / 过牌 / 出牌. */
+.game-bottom{display:flex;gap:10px;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
+.game-bottom .tool-btn{min-width:92px;text-align:center}
+.game-bottom #btn-game-arrange{flex:1.15 1 0}
+.game-log{position:absolute;left:16px;top:59%;transform:translateY(-50%);z-index:6;
+  width:224px;max-height:40vh;overflow-y:scroll;overflow-x:hidden;color:var(--ink);font-size:12.5px;line-height:1.7;
   border:1px solid var(--line);border-radius:12px;padding:10px 12px;
   background:rgba(10,16,34,.5);box-shadow:var(--shadow);
   scrollbar-width:thin;scrollbar-color:rgba(91,140,255,.55) rgba(255,255,255,.05)}
@@ -134,8 +143,6 @@ BASE_STYLES_PLACEHOLDER
 .game-log::-webkit-scrollbar-track{background:rgba(255,255,255,.05);border-radius:4px}
 .game-log::-webkit-scrollbar-thumb{background:rgba(91,140,255,.55);border-radius:4px}
 .game-log::-webkit-scrollbar-thumb:hover{background:rgba(91,140,255,.85)}
-.game-bottom{display:flex;gap:10px;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
-.game-bottom .tool-btn{min-width:92px;text-align:center}
 
 /* ---------- Mobile / touch adaptation (deluxe only, <=720px) ---------- */
 @media(max-width:720px){
@@ -199,12 +206,10 @@ BASE_STYLES_PLACEHOLDER
    * scrolling (plain `center` clips the leading cards out of scroll range). */
   .my-hand{justify-content:safe center;gap:7px;padding:22px 8px 8px;max-height:132px;min-height:92px;
     -webkit-overflow-scrolling:touch}
-  .game-actions{gap:6px}
-  .game-actions>span{display:none}
-  /* 44px minimum touch target for every game control. */
-  .game-actions .tool-btn,.game-bottom .tool-btn{min-height:44px;font-size:13px}
-  .game-bottom{gap:8px;padding-top:6px}
-  .game-bottom .tool-btn{min-width:0;flex:1 1 0}
+  /* 44px minimum touch target for every game control (arrange/pass/play in
+   * the SAME bottom row after v24). */
+  .game-bottom{gap:6px;padding-top:6px}
+  .game-bottom .tool-btn{min-height:44px;font-size:13px;min-width:0;flex:1 1 0}
   /* Settlement modal fits a narrow phone; seats keep the distinct play row. */
   #game-settle{min-width:0;width:92vw;padding:14px;max-height:86vh;overflow:auto}
   .settle-title{font-size:16px}
@@ -248,7 +253,7 @@ BASE_STYLES_PLACEHOLDER
       "seats   seats"
       "table   log"
       "hand    log"
-      "actions bottom";
+      "bottom  bottom";
     background:linear-gradient(180deg,rgba(9,14,28,.99),rgba(9,14,28,.985) 55%,rgba(9,14,28,.99))}
 
   /* Counter: one scrollable row instead of two wrapped rows. */
@@ -288,13 +293,10 @@ BASE_STYLES_PLACEHOLDER
     overflow:auto;z-index:auto}
   .game-log:before{font-size:11px;margin-bottom:4px;padding-bottom:4px}
 
-  /* Arrange/flatten (left) and Pass/Play (right) share ONE 44px row. */
-  .game-actions{grid-area:actions;justify-content:flex-start;align-items:stretch;
-    gap:6px;padding:0;margin:0;flex-wrap:nowrap}
-  .game-actions>span{display:none}
+  /* v24: one full-width bottom row — 理牌(循环)/过牌/出牌 side by side. */
   .game-bottom{grid-area:bottom;gap:6px;padding:0;margin:0;border:0;align-items:stretch}
-  .game-actions .tool-btn,.game-bottom .tool-btn{min-height:44px;min-width:0;
-    font-size:12px;padding:6px 10px;flex:1 1 0}
+  .game-bottom .tool-btn{min-height:44px;min-width:0;
+    font-size:12px;padding:6px 8px;flex:1 1 0}
 
   /* Modals must fit the short height. */
   #game-setup{padding:12px;gap:8px;max-height:92vh;overflow:auto}
@@ -348,6 +350,10 @@ BASE_STYLES_PLACEHOLDER
   border:1px solid var(--brand2);background:rgba(20,27,46,.95);color:#c9bdff;
   border-radius:6px;padding:1px 5px;font-size:9px;cursor:pointer;white-space:nowrap}
 .pcard-stack .stack-all:hover{border-color:var(--brand);color:#fff}
+/* v24: combo-name badge (炸弹/顺子/同花顺…) shown above a 理牌 scheme stack. */
+.pcard-stack .stack-label{position:absolute;left:0;top:-15px;z-index:96;
+  color:#ffcf7a;font-size:9px;font-weight:700;white-space:nowrap;pointer-events:none;
+  text-shadow:0 1px 3px rgba(0,0,0,.85)}
 .my-hand{padding-bottom:24px}
 /* Marquee (drag box-select) overlay inside the hand row. */
 .hand-marquee{position:absolute;border:1px dashed var(--brand);

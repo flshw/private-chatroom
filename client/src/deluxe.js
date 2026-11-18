@@ -9,8 +9,8 @@ window.PCDeluxe = (function () {
   var game = null, ctx = null, selected = {};
   var membersList = [], mySid = null, picked = [], setupOpen = false;
   var partnerPick = null;   // sid of chosen 对家 (teammate)
-  var spread = false; // false = stacked by rank (default), true = flat
-  var marqueeOn = false; // drag box-select mode
+  var spread = false; // false = stacked by rank (default), true = flat (v24: set by 平铺 cycle mode)
+  var marqueeOn = true; // v24: box-select is ALWAYS on (button removed)
   var lastTableSig = ''; // signature of the last rendered table, for play animation
   var settleShownFor = null; // round number whose settlement panel is currently shown
   var $ = function (id) { return document.getElementById(id); };
@@ -167,6 +167,9 @@ window.PCDeluxe = (function () {
    * jokers, level card/2, A, K … 3 — same-rank cards stacked together.
    * Uses the engine's deterministic sortHandForView. */
   function arrangedOrder(cards, st) {
+    // v24: when a 理牌 scheme is active, render by its combos (see renderHand),
+    // so simply preserve the order the scheme produced.
+    if (st && st.arrangeGroups && st.arrangeGroups.length && cards.length) return cards.slice();
     if (window.PCGame && window.PCGame.sortHandForView && cards.length) {
       return window.PCGame.sortHandForView(cards, st.level);
     }
@@ -190,13 +193,28 @@ window.PCDeluxe = (function () {
     if (!shown.length) return;
     var readonly = false; // spectator feature removed — everyone plays their own hand
     var ordered = arrangedOrder(shown, st);
-    // Group by rank in the arranged order.
+    // v24: when a 理牌 scheme is active, group cards by the scheme's combos
+    // (labelled stacks: 炸弹/顺子/同花顺…); otherwise group by rank as before.
     var groups = [], byRank = {};
-    ordered.forEach(function (c) {
-      var key = c.r;
-      if (!byRank[key]) { byRank[key] = { rank: c.r, cards: [] }; groups.push(byRank[key]); }
-      byRank[key].cards.push(c);
-    });
+    if (st && st.arrangeGroups && st.arrangeGroups.length) {
+      var byId = {};
+      ordered.forEach(function (c) { byId[c.id] = c; });
+      st.arrangeGroups.forEach(function (ag) {
+        var cs = [];
+        ag.ids.forEach(function (id) { if (byId[id]) { cs.push(byId[id]); delete byId[id]; } });
+        if (cs.length) groups.push({ rank: cs[0].r, label: ag.name, cards: cs });
+      });
+      // Safety: any card not covered by a scheme group still gets shown.
+      ordered.forEach(function (c) {
+        if (byId[c.id]) { groups.push({ rank: c.r, label: '', cards: [c] }); delete byId[c.id]; }
+      });
+    } else {
+      ordered.forEach(function (c) {
+        var key = c.r;
+        if (!byRank[key]) { byRank[key] = { rank: c.r, label: '', cards: [] }; groups.push(byRank[key]); }
+        byRank[key].cards.push(c);
+      });
+    }
     function toggleOne(c) {
       return readonly ? null : function (e) {
         if (e) e.stopPropagation();
@@ -247,7 +265,15 @@ window.PCDeluxe = (function () {
         el.style.zIndex = String(i + 1);
         stack.appendChild(el);
       });
-      stack.title = (RANK_LABEL[g.rank] || g.rank) + ' × ' + g.cards.length + '（点单张牌可选/取消）';
+      stack.title = (g.label ? g.label + ' · ' : '') +
+        (RANK_LABEL[g.rank] || g.rank) + ' × ' + g.cards.length + '（点单张牌可选/取消）';
+      // v24: show the scheme's combo name (炸弹/顺子/同花顺…) when 理牌 is active.
+      if (g.label) {
+        var lab = document.createElement('span');
+        lab.className = 'stack-label';
+        lab.textContent = g.label;
+        stack.appendChild(lab);
+      }
       // "全选" under each same-rank stack: tap to select/deselect the whole
       // group in one action (the user asked for a per-group select-all).
       if (!readonly) {
@@ -470,16 +496,20 @@ window.PCDeluxe = (function () {
 
   function onPassClick() { game.pass(); }
 
+  /* v24: one button cycles 理牌① 火力集中 → 理牌② 少手数 → 平铺 → back.
+   * The engine performs the reorder and reports the label; the button mirrors
+   * it. `spread` (flat render) is on only for the 平铺 mode. */
   function onArrangeClick() {
     if (!game) return;
-    if (!game.autoArrange || !game.autoArrange()) ctx.toast('暂无可整理的手牌');
-    else renderGame(game.state);
-  }
-  function onSpreadClick() {
-    spread = !spread;
-    var b = $('btn-game-spread');
-    if (b) b.textContent = spread ? '⊞ 堆叠' : '↔ 平铺';
-    if (game) renderGame(game.state);
+    var r = game.autoArrange && game.autoArrange();
+    if (!r) { ctx.toast('暂无可整理的手牌'); return; }
+    spread = (r.mode === 2);
+    var b = $('btn-game-arrange');
+    if (b) {
+      b.textContent = r.mode === 2 ? '↔ 平铺' : (r.mode === 0 ? '🀄 理牌① 火力' : '🀄 理牌② 少手');
+      b.title = '当前：' + r.label + ' · 点击循环切换理牌方案';
+    }
+    renderGame(game.state);
   }
 
   function onStartClick() {
@@ -653,14 +683,8 @@ window.PCDeluxe = (function () {
     window.addEventListener('pointermove', move, { passive: false });
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
-  }
-  function toggleMarquee() {
-    marqueeOn = !marqueeOn;
-    var hand = $('my-hand');
-    if (hand) hand.classList.toggle('marquee-on', marqueeOn);
-    var b = $('btn-game-marquee');
-    if (b) { b.classList.toggle('on', marqueeOn); b.textContent = marqueeOn ? '▧ 框选·开' : '▧ 框选'; }
-    if (ctx) ctx.toast(marqueeOn ? '框选已开启：在手牌区拖拽画框选牌' : '框选已关闭');
+    // v24: box-select is permanently enabled — no on/off button.
+    hand.classList.add('marquee-on');
   }
 
   function onSettleNext() {
@@ -674,8 +698,7 @@ window.PCDeluxe = (function () {
     $('btn-game-play') && $('btn-game-play').addEventListener('click', onPlayClick);
     $('btn-game-pass') && $('btn-game-pass').addEventListener('click', onPassClick);
     $('btn-game-arrange') && $('btn-game-arrange').addEventListener('click', onArrangeClick);
-    $('btn-game-spread') && $('btn-game-spread').addEventListener('click', onSpreadClick);
-    $('btn-game-marquee') && $('btn-game-marquee').addEventListener('click', toggleMarquee);
+    // v24: 平铺/框选 buttons removed — 平铺 is a 理牌 cycle mode, 框选 always on.
     $('btn-game-diag') && $('btn-game-diag').addEventListener('click', openDiag);
     $('btn-diag-close') && $('btn-diag-close').addEventListener('click', closeDiag);
     $('btn-diag-refresh') && $('btn-diag-refresh').addEventListener('click', refreshDiag);
