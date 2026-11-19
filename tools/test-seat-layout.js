@@ -97,28 +97,34 @@ function renderWith(meSid, partnerSid) {
   return byId['game-seats'].children.map(posOf);
 }
 
-console.log('\n=== v29 座位方位 + 按钮尺寸测试 ===');
+console.log('\n=== v30 座位方位 + 记牌器同行 + 侧栏 + 按钮尺寸测试 ===');
 
-// Case 1: I am seat0, partner is bot_2 (seat2) -> me bottom, partner top, others left/right
+// Case 1: I am seat0, partner is bot_2 (seat2) -> only 3 boxes: partner top, others left/right
 {
   const pos = renderWith('me', 'bot_2');
-  check('渲染出 4 个座位', pos.length === 4, JSON.stringify(pos));
-  check('自己在下方(bottom)', pos[0] === 'bottom', JSON.stringify(pos));
-  check('对家在上方(top)', pos[2] === 'top', JSON.stringify(pos));
-  check('两名对手分别在左右', ['left','right'].indexOf(pos[1]) !== -1 && ['left','right'].indexOf(pos[3]) !== -1 && pos[1] !== pos[3], JSON.stringify(pos));
+  check('渲染出 3 个座位（本人框已删除）', pos.length === 3, JSON.stringify(pos));
+  check('不含 bottom 方位（无本人框）', pos.indexOf('bottom') === -1, JSON.stringify(pos));
+  check('对家在上方(top)', pos[1] === 'top', JSON.stringify(pos));
+  check('两名对手分别在左右', pos[0] === 'left' && pos[2] === 'right', JSON.stringify(pos));
 }
 
-// Case 2: I am bot_3 (seat3), partner is bot_1 -> compass follows ROLE not index
+// Case 2: I am bot_3 (seat3), partner is bot_1 -> compass follows ROLE not index; me box omitted
 {
   const pos = renderWith('bot_3', 'bot_1');
-  check('换座位后自己仍在下方(bottom)', pos[3] === 'bottom', JSON.stringify(pos));
+  check('换座位后仍只有 3 个框', pos.length === 3 && pos.indexOf('bottom') === -1, JSON.stringify(pos));
   check('换座位后对家仍在上方(top)', pos[1] === 'top', JSON.stringify(pos));
-  check('换座位后另两人在左右', pos[0] && pos[2] && ['left','right'].indexOf(pos[0]) !== -1 && ['left','right'].indexOf(pos[2]) !== -1 && pos[0] !== pos[2], JSON.stringify(pos));
+  check('换座位后另两人在左右', pos[0] === 'left' && pos[2] === 'right', JSON.stringify(pos));
 }
 
 // Built HTML assertions
 const deluxe = fs.readFileSync(path.join(__dirname, '..', 'client', 'dist', 'private-chat-deluxe.template.html'), 'utf8');
 check('CSS 有 seat-pos-top 绝对定位', deluxe.indexOf('.seat.seat-pos-top{left:50%;top:0;transform:translateX(-50%)}') !== -1);
+check('无本人座位框（源码已跳过 isMe）', deluxe.indexOf('if (s && s.isMe) continue;') !== -1);
+check('记牌器与级别同行容器 game-headrow', deluxe.indexOf('class="game-headrow"') !== -1 && deluxe.indexOf('.game-headrow{display:flex') !== -1);
+check('游戏聊天侧栏 UI', deluxe.indexOf('id="game-chat"') !== -1);
+check('游戏聊天侧栏样式(右侧对称)', deluxe.indexOf('.game-chat{right:16px}') !== -1);
+check('牌局动态高度加大(66vh)', deluxe.indexOf('max-height:66vh') !== -1);
+check('app 镜像聊天到游戏侧栏', deluxe.indexOf("var gchat = $('game-chat');") !== -1);
 check('CSS 出牌按钮 8em', deluxe.indexOf('#btn-game-play{flex:0 0 8em;width:8em') !== -1);
 check('CSS 按钮间隔 2em', deluxe.indexOf('.game-bottom{display:flex;gap:2em;justify-content:center') !== -1);
 check('全双工语音已从构建产物移除', deluxe.indexOf('btn-voice-live') === -1 && deluxe.indexOf('RTCPeerConnection') === -1);

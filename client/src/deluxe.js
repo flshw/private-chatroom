@@ -376,24 +376,26 @@ window.PCDeluxe = (function () {
     // Seats — each player has a DISTINCT position showing their nickname,
     // remaining card count (highlighted when < 10) and their last play THIS
     // trick. This makes "谁出了什么" readable without guessing from one pile.
-    // v29: the four seats are placed around the table by ROLE, not seat index:
-    //   bottom = me, top = 对家(teammate), left/right = the two opponents.
+    // v30: only THREE boxes surround the table — 对家 above, two opponents
+    // left/right. The "me" box is removed: my identity + card count are already
+    // shown in the my-info-bar directly above the play buttons, so a second
+    // box for me was redundant and crowded the centre.
     seats.innerHTML = '';
     var oppSeen = 0;
     for (var i = 0; i < 4; i++) {
       var s = st.seats[i];
+      if (s && s.isMe) continue;
       var el = document.createElement('div');
       var rolePos;
-      if (s && s.isMe) rolePos = 'bottom';
-      else if (s && st.partnerSid === s.sid) rolePos = 'top';
+      if (s && st.partnerSid === s.sid) rolePos = 'top';
       else { rolePos = (oppSeen++ === 0) ? 'left' : 'right'; }
       el.className = 'seat seat-pos-' + rolePos +
         (s && st.partnerSid === s.sid ? ' is-partner' : '') +
-        (s && s.isMe ? ' me' : '') + (st.turn && s && st.turn === s.sid ? ' turn' : '');
+        (st.turn && s && st.turn === s.sid ? ' turn' : '');
       var nm = document.createElement('div');
       var role = '';
       if (s && st.partnerSid === s.sid) role = ' · 对家';
-      nm.textContent = s ? (s.nickname + (s.isMe ? '（我）' : '') + role) : '空位';
+      nm.textContent = s ? (s.nickname + role) : '空位';
       var cnt = document.createElement('div'); cnt.className = 'cnt';
       if (s && st.phase !== 'idle' && st.phase !== 'dealing') {
         var left = (game && game.remainingOf) ? game.remainingOf(s.sid) : null;

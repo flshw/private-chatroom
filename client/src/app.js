@@ -368,6 +368,30 @@
     var box = $('messages');
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
+    // v30 deluxe: mirror chat into the in-game chat panel on the right. This
+    // element only exists in the deluxe template (guarded for lite). Dedupe
+    // already happened above, so each message is appended to both panes once.
+    var gchat = $('game-chat');
+    if (gchat) {
+      var gc = document.createElement('div');
+      gc.className = 'gc' + (msg.mine ? ' me' : '');
+      var gcWho = document.createElement('span');
+      gcWho.className = 'gc-who';
+      gcWho.textContent = (msg.mine ? '我' : msg.who) + '：';
+      var gcText = document.createElement('span');
+      if (kind === 'file') {
+        try {
+          var fmeta = JSON.parse(text);
+          gcText.textContent = fmeta.voice ? '🎤 语音 · ' + (fmeta.duration || '?') + '″' : '📎 ' + (fmeta.name || '文件');
+        } catch (fe) { gcText.textContent = '[文件]'; }
+      } else {
+        gcText.textContent = text;
+      }
+      gc.appendChild(gcWho); gc.appendChild(gcText);
+      gchat.appendChild(gc);
+      while (gchat.childNodes.length > 80) gchat.removeChild(gchat.firstChild);
+      gchat.scrollTop = gchat.scrollHeight;
+    }
   }
 
   function updateMembersUI() {
@@ -551,6 +575,7 @@
     state.joined = false; state.mySid = null; state.seq = 0; state.uk = null;
     state.messages = []; state.msgKeys = {}; state.mySids = {}; entering = false;
     $('messages').innerHTML = '';
+    var gchat = $('game-chat'); if (gchat) gchat.innerHTML = '';
     $('input').value = ''; $('input').disabled = false; $('btn-send').disabled = false;
     var gp = $('game-panel'); if (gp) gp.classList.add('hidden');
     var mp = $('members-panel'); if (mp) mp.classList.add('hidden');

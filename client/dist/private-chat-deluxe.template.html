@@ -171,13 +171,19 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   border-radius:8px;padding:5px 9px;font-size:12px;cursor:pointer}
 .player-chip:hover{border-color:var(--brand)}
 .player-chip.on{border-color:var(--ok);color:var(--ok);background:rgba(62,207,142,.12)}
+/* v30: the level text and the card counter share ONE row, counter to the RIGHT
+ * of the "掼蛋 打2·第1局" text (requirement 1). */
+.game-headrow{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:nowrap}
+.game-headrow .game-top{margin-bottom:0;flex:0 0 auto;flex-wrap:nowrap;white-space:nowrap}
+.game-headrow #card-counter{flex:1 1 auto;min-width:0;margin-bottom:0}
 .game-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap}
 .game-top .title{font-weight:700;font-size:16px}
 .game-top .level{color:var(--brand);font-size:13px}
 .game-top .spacer{flex:1}
-/* v29: the four seats sit around the table by role — me bottom, teammate
- * (对家) top, the two opponents left/right. The centre stays open as the table
- * felt; the played-card area (.game-table) follows below. */
+/* v30: three seats sit around the table by ROLE — 对家 above, the two
+ * opponents left/right. The former "me" box was removed (my identity + card
+ * count are shown in .my-info-bar below the hand). The centre stays open as
+ * the table felt; the played-card area (.game-table) follows below. */
 .game-seats{position:relative;height:172px;margin:2px 0 8px}
 .game-seats:after{content:'🃏';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   font-size:40px;color:rgba(201,189,255,.10);pointer-events:none;user-select:none}
@@ -262,18 +268,29 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
 .game-bottom .tool-btn{flex:0 0 4.6em;width:4.6em;min-width:0;max-width:4.6em;
   text-align:center;padding-left:2px;padding-right:2px;white-space:nowrap;overflow:hidden}
 .game-bottom #btn-game-play{flex:0 0 8em;width:8em;min-width:0;max-width:8em}
-.game-log{position:absolute;left:16px;top:59%;transform:translateY(-50%);z-index:6;
-  width:224px;max-height:40vh;overflow-y:scroll;overflow-x:hidden;color:var(--ink);font-size:12.5px;line-height:1.7;
+/* v30: the two side panels share one geometry — vertically centred on the
+ * LEFT (牌局动态) and RIGHT (游戏聊天), mirrored about the table. Taller than
+ * the old 40vh log so long matches and conversations stay readable. */
+.game-log,.game-chat{position:absolute;top:50%;transform:translateY(-50%);z-index:6;
+  width:230px;min-height:180px;max-height:66vh;overflow-y:scroll;overflow-x:hidden;
+  color:var(--ink);font-size:12.5px;line-height:1.7;
   border:1px solid var(--line);border-radius:12px;padding:10px 12px;
-  background:rgba(10,16,34,.5);box-shadow:var(--shadow);
+  background:rgba(10,16,34,.62);box-shadow:var(--shadow);
   scrollbar-width:thin;scrollbar-color:rgba(91,140,255,.55) rgba(255,255,255,.05)}
-.game-log:before{content:'牌局动态';display:block;font-size:12px;font-weight:700;color:#c9bdff;
+.game-log{left:16px}
+.game-chat{right:16px}
+.game-log:before{content:'牌局动态';}
+.game-chat:before{content:'游戏聊天';}
+.game-log:before,.game-chat:before{display:block;font-size:12px;font-weight:700;color:#c9bdff;
   margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--line)}
-/* Always-visible scrollbar for the play log so long matches stay navigable. */
-.game-log::-webkit-scrollbar{width:7px}
-.game-log::-webkit-scrollbar-track{background:rgba(255,255,255,.05);border-radius:4px}
-.game-log::-webkit-scrollbar-thumb{background:rgba(91,140,255,.55);border-radius:4px}
-.game-log::-webkit-scrollbar-thumb:hover{background:rgba(91,140,255,.85)}
+.game-chat .gc{margin:0 0 5px;word-break:break-word}
+.game-chat .gc .gc-who{color:var(--brand);font-weight:700}
+.game-chat .gc.me .gc-who{color:var(--ok)}
+/* Always-visible scrollbar so long logs/chats stay navigable. */
+.game-log::-webkit-scrollbar,.game-chat::-webkit-scrollbar{width:7px}
+.game-log::-webkit-scrollbar-track,.game-chat::-webkit-scrollbar-track{background:rgba(255,255,255,.05);border-radius:4px}
+.game-log::-webkit-scrollbar-thumb,.game-chat::-webkit-scrollbar-thumb{background:rgba(91,140,255,.55);border-radius:4px}
+.game-log::-webkit-scrollbar-thumb:hover,.game-chat::-webkit-scrollbar-thumb:hover{background:rgba(91,140,255,.85)}
 
 /* ---------- Mobile / touch adaptation (deluxe only, <=720px) ---------- */
 @media(max-width:720px){
@@ -330,11 +347,11 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   .game-table{width:100%;max-height:130px;min-height:66px;padding:8px;gap:4px}
   .game-table>.pcard{width:34px;height:48px}
 
-  /* Play log: no room to float on a narrow screen. Flow it as a compact bar
-   * above the hand instead of covering the played cards / chat. */
-  .game-log{position:static;transform:none;width:100%;max-height:76px;overflow:auto;
-    left:auto;top:auto;margin:6px 0;padding:7px 10px;font-size:11.5px;line-height:1.5;flex:0 0 auto}
-  .game-log:before{display:inline-block;margin:0 6px 0 0;padding:0;border:0;font-size:11px}
+  /* Play log + in-game chat: no room to float on a narrow screen. Flow them as
+   * two compact bars above the hand instead of covering cards / each other. */
+  .game-log,.game-chat{position:static;transform:none;width:100%;max-height:66px;min-height:0;overflow:auto;
+    left:auto;right:auto;top:auto;margin:5px 0;padding:7px 10px;font-size:11.5px;line-height:1.5;flex:0 0 auto}
+  .game-log:before,.game-chat:before{display:inline-block;margin:0 6px 0 0;padding:0;border:0;font-size:11px}
 
   /* Hand: `safe center` keeps the fan centred when it fits but falls back to
    * flex-start when it overflows, so the first/last cards stay reachable by
@@ -379,27 +396,30 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   .composer input[type=text]{font-size:16px;padding:8px 10px}
   #btn-send{min-height:44px}
 
-  /* The whole game panel becomes a short, two-column grid. */
+  /* The whole game panel becomes a short, two-column grid (v30: the right
+   * column is split into 牌局动态 + 游戏聊天 side panels). */
   #game-panel{inset:58px 0 50px 0;padding:5px 10px;gap:4px;
     display:grid;overflow:hidden;
-    grid-template-columns:minmax(0,1fr) 172px;
+    grid-template-columns:minmax(0,1fr) 132px 132px;
     grid-template-rows:auto auto minmax(40px,1fr) minmax(0,80px) 44px;
     grid-template-areas:
-      "counter counter"
-      "seats   seats"
-      "table   log"
-      "hand    log"
-      "bottom  bottom";
+      "counter counter counter"
+      "seats   seats   seats"
+      "table   log     chat"
+      "hand    log     chat"
+      "bottom  bottom  bottom";
     background:linear-gradient(180deg,rgba(9,14,28,.99),rgba(9,14,28,.985) 55%,rgba(9,14,28,.99))}
 
-  /* Counter: one scrollable row instead of two wrapped rows. */
-  #card-counter{grid-area:counter;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;
+  /* Counter: one scrollable row. v30: the wrapper owns the counter grid area;
+   * the level text is folded into the same row on the left. */
+  .game-headrow{grid-area:counter;display:flex;align-items:center;gap:6px;margin:0;min-height:0}
+  #card-counter{flex:1 1 auto;min-width:0;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;
     padding:4px 6px;margin:0;gap:4px;min-height:0}
   #card-counter .cc-title{font-size:11px;position:sticky;left:0;z-index:1;
     background:rgba(10,14,28,.96);padding-right:4px}
   .cc-rank{font-size:11px;min-width:30px;padding:2px 4px;flex:0 0 auto}
 
-  /* Title row is redundant with the toolbar's 掼蛋 button on a short screen. */
+  /* Title is redundant with the toolbar's 掼蛋 button on a short screen. */
   .game-top{display:none}
 
   /* v29: compact role-based compass layout in the short landscape viewport. */
@@ -428,12 +448,15 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   .pcard .pip b,.pcard .pip i{font-size:9px}
   .pcard-stack>.pcard{left:calc(6px * var(--i, 0));top:calc(12px * var(--i, 0))}
 
-  /* Play log occupies the right column across the table+hand rows — it no
-   * longer floats over the seats or played cards. */
-  .game-log{grid-area:log;position:static;transform:none;width:auto;height:100%;max-height:none;
-    left:auto;top:auto;margin:0;padding:6px 8px;font-size:11px;line-height:1.4;
+  /* v30: 牌局动态 + 游戏聊天 occupy the two right columns across table+hand
+   * rows — they no longer float over the seats or played cards. */
+  .game-log{grid-area:log}
+  .game-chat{grid-area:chat}
+  .game-log,.game-chat{position:static;transform:none;width:auto;height:100%;max-height:none;min-height:0;
+    left:auto;right:auto;top:auto;margin:0;padding:6px 8px;font-size:11px;line-height:1.4;
     overflow:auto;z-index:auto}
-  .game-log:before{font-size:11px;margin-bottom:4px;padding-bottom:4px}
+  .game-log:before,.game-chat:before{font-size:11px;margin-bottom:4px;padding-bottom:4px}
+  .game-chat .gc{margin-bottom:3px}
 
   /* v24: one full-width bottom row — 理牌(循环)/过牌/出牌 side by side. */
   .game-bottom{grid-area:bottom;gap:2em;padding:0;margin:0;border:0;align-items:stretch}
@@ -571,15 +594,17 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   <input type="file" id="file-input" class="hidden" />
 
   <div id="game-panel" class="hidden">
-    <div id="card-counter"><span class="cc-title">记牌器 · 剩余</span></div>
-    <div class="game-top">
-      <span class="title">🃏 掼蛋</span>
-      <span class="level" id="game-level">打 2</span>
-      <span class="spacer"></span>
+    <div class="game-headrow">
+      <div class="game-top">
+        <span class="title">🃏 掼蛋</span>
+        <span class="level" id="game-level">打 2</span>
+      </div>
+      <div id="card-counter"><span class="cc-title">记牌器 · 剩余</span></div>
     </div>
     <div class="game-seats" id="game-seats"></div>
     <div class="game-table" id="game-table"><div class="tip">点击「掼蛋」选择玩家后开局</div></div>
     <div class="game-log" id="game-log"></div>
+    <div class="game-chat" id="game-chat" aria-live="polite"></div>
     <div class="my-hand" id="my-hand"></div>
     <div class="my-info-bar" id="my-info-bar" aria-live="polite"></div>
     <div class="game-bottom">
@@ -4073,24 +4098,26 @@ window.PCDeluxe = (function () {
     // Seats — each player has a DISTINCT position showing their nickname,
     // remaining card count (highlighted when < 10) and their last play THIS
     // trick. This makes "谁出了什么" readable without guessing from one pile.
-    // v29: the four seats are placed around the table by ROLE, not seat index:
-    //   bottom = me, top = 对家(teammate), left/right = the two opponents.
+    // v30: only THREE boxes surround the table — 对家 above, two opponents
+    // left/right. The "me" box is removed: my identity + card count are already
+    // shown in the my-info-bar directly above the play buttons, so a second
+    // box for me was redundant and crowded the centre.
     seats.innerHTML = '';
     var oppSeen = 0;
     for (var i = 0; i < 4; i++) {
       var s = st.seats[i];
+      if (s && s.isMe) continue;
       var el = document.createElement('div');
       var rolePos;
-      if (s && s.isMe) rolePos = 'bottom';
-      else if (s && st.partnerSid === s.sid) rolePos = 'top';
+      if (s && st.partnerSid === s.sid) rolePos = 'top';
       else { rolePos = (oppSeen++ === 0) ? 'left' : 'right'; }
       el.className = 'seat seat-pos-' + rolePos +
         (s && st.partnerSid === s.sid ? ' is-partner' : '') +
-        (s && s.isMe ? ' me' : '') + (st.turn && s && st.turn === s.sid ? ' turn' : '');
+        (st.turn && s && st.turn === s.sid ? ' turn' : '');
       var nm = document.createElement('div');
       var role = '';
       if (s && st.partnerSid === s.sid) role = ' · 对家';
-      nm.textContent = s ? (s.nickname + (s.isMe ? '（我）' : '') + role) : '空位';
+      nm.textContent = s ? (s.nickname + role) : '空位';
       var cnt = document.createElement('div'); cnt.className = 'cnt';
       if (s && st.phase !== 'idle' && st.phase !== 'dealing') {
         var left = (game && game.remainingOf) ? game.remainingOf(s.sid) : null;
@@ -4841,6 +4868,30 @@ window.PCDeluxe = (function () {
     var box = $('messages');
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
+    // v30 deluxe: mirror chat into the in-game chat panel on the right. This
+    // element only exists in the deluxe template (guarded for lite). Dedupe
+    // already happened above, so each message is appended to both panes once.
+    var gchat = $('game-chat');
+    if (gchat) {
+      var gc = document.createElement('div');
+      gc.className = 'gc' + (msg.mine ? ' me' : '');
+      var gcWho = document.createElement('span');
+      gcWho.className = 'gc-who';
+      gcWho.textContent = (msg.mine ? '我' : msg.who) + '：';
+      var gcText = document.createElement('span');
+      if (kind === 'file') {
+        try {
+          var fmeta = JSON.parse(text);
+          gcText.textContent = fmeta.voice ? '🎤 语音 · ' + (fmeta.duration || '?') + '″' : '📎 ' + (fmeta.name || '文件');
+        } catch (fe) { gcText.textContent = '[文件]'; }
+      } else {
+        gcText.textContent = text;
+      }
+      gc.appendChild(gcWho); gc.appendChild(gcText);
+      gchat.appendChild(gc);
+      while (gchat.childNodes.length > 80) gchat.removeChild(gchat.firstChild);
+      gchat.scrollTop = gchat.scrollHeight;
+    }
   }
 
   function updateMembersUI() {
@@ -5024,6 +5075,7 @@ window.PCDeluxe = (function () {
     state.joined = false; state.mySid = null; state.seq = 0; state.uk = null;
     state.messages = []; state.msgKeys = {}; state.mySids = {}; entering = false;
     $('messages').innerHTML = '';
+    var gchat = $('game-chat'); if (gchat) gchat.innerHTML = '';
     $('input').value = ''; $('input').disabled = false; $('btn-send').disabled = false;
     var gp = $('game-panel'); if (gp) gp.classList.add('hidden');
     var mp = $('members-panel'); if (mp) mp.classList.add('hidden');
