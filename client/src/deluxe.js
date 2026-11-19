@@ -2,8 +2,8 @@
 'use strict';
 /*
  * PCDeluxe — deluxe-edition UI controller. Loaded only in the deluxe template.
- * Bridges the shared app.js hooks to the Guandan game, 3D scene, live voice
- * and draggable PiP video. The simple edition never loads this file.
+ * Bridges the shared app.js hooks to the Guandan game and 3D scene.
+ * The simple edition never loads this file.
  */
 window.PCDeluxe = (function () {
   var game = null, ctx = null, selected = {};
@@ -376,11 +376,20 @@ window.PCDeluxe = (function () {
     // Seats — each player has a DISTINCT position showing their nickname,
     // remaining card count (highlighted when < 10) and their last play THIS
     // trick. This makes "谁出了什么" readable without guessing from one pile.
+    // v29: the four seats are placed around the table by ROLE, not seat index:
+    //   bottom = me, top = 对家(teammate), left/right = the two opponents.
     seats.innerHTML = '';
+    var oppSeen = 0;
     for (var i = 0; i < 4; i++) {
       var s = st.seats[i];
       var el = document.createElement('div');
-      el.className = 'seat' + (s && s.isMe ? ' me' : '') + (st.turn && s && st.turn === s.sid ? ' turn' : '');
+      var rolePos;
+      if (s && s.isMe) rolePos = 'bottom';
+      else if (s && st.partnerSid === s.sid) rolePos = 'top';
+      else { rolePos = (oppSeen++ === 0) ? 'left' : 'right'; }
+      el.className = 'seat seat-pos-' + rolePos +
+        (s && st.partnerSid === s.sid ? ' is-partner' : '') +
+        (s && s.isMe ? ' me' : '') + (st.turn && s && st.turn === s.sid ? ' turn' : '');
       var nm = document.createElement('div');
       var role = '';
       if (s && st.partnerSid === s.sid) role = ' · 对家';
@@ -446,6 +455,31 @@ window.PCDeluxe = (function () {
     var lv = $('game-level'); if (lv) lv.textContent = '打 ' + game.rankName(st.level) + ' · 第 ' + (st.roundNo || 1) + ' 局';
     var myTurn = st.turn === ctx.state.mySid;
     var inPlay = st.phase === 'playing';
+    // v29: my info strip — centred above the play buttons, NOT full width.
+    var bar = $('my-info-bar');
+    if (bar) {
+      bar.innerHTML = '';
+      var meLeft = (game && game.remainingOf && ctx.state.mySid) ? game.remainingOf(ctx.state.mySid) : null;
+      var meNick = '';
+      var parNick = '对家';
+      (st.seats || []).forEach(function (s) {
+        if (!s) return;
+        if (s.isMe) meNick = s.nickname || '我';
+        if (st.partnerSid === s.sid) parNick = s.nickname || '对家';
+      });
+      var seg = function (txt, cls) {
+        var sp = document.createElement('span');
+        if (cls) sp.className = cls;
+        sp.textContent = txt; bar.appendChild(sp);
+      };
+      var b = document.createElement('b'); b.textContent = '我' + (meNick && meNick !== '我' ? ' · ' + meNick : ''); bar.appendChild(b);
+      if (meLeft !== null) seg(meLeft + ' 张');
+      seg('对家：' + parNick);
+      if (expiredUI) seg('房间已解散', 'mi-wait');
+      else if (!inPlay) seg('等待开局', 'mi-wait');
+      else if (myTurn) seg('轮到我出牌', 'mi-turn');
+      else seg('等待他人出牌', 'mi-wait');
+    }
     var btnPlay = $('btn-game-play'), btnPass = $('btn-game-pass');
     if (btnPlay) btnPlay.disabled = !myTurn;
     // Keep 过牌 clickable for the whole match: a grey button that ignores taps
@@ -469,7 +503,7 @@ window.PCDeluxe = (function () {
   function setExpired() {
     expiredUI = true;
     var ids = ['btn-game', 'btn-game-start', 'btn-game-play', 'btn-game-pass',
-      'btn-game-arrange', 'btn-settle-next', 'btn-voice-live'];
+      'btn-game-arrange', 'btn-settle-next'];
     ids.forEach(function (id) {
       var b = $(id);
       if (!b) return;
@@ -559,25 +593,6 @@ window.PCDeluxe = (function () {
   }
 
   function onGameState(f) { /* public turn/seat state already rendered via game.onUpdate */ }
-
-  /* --- full-duplex live voice (audio-only). Auto-answer lives in media.js. --- */
-  function toggleVoice() {
-    if (!window.PCMedia || !ctx || !ctx.media) return;
-    if (!ctx.media.inCall()) {
-      ctx.media.startVoice();
-      var b = $('btn-voice-live'); if (b) b.classList.add('on');
-    } else {
-      ctx.media.hangup();
-      var b2 = $('btn-voice-live'); if (b2) b2.classList.remove('on');
-      ctx.toast('语音通话已关闭');
-    }
-  }
-
-  /* Small status chip in the top bar during a live voice call (no video). */
-  function pipShowStatus(on) {
-    var b = $('btn-voice-live');
-    if (b) { b.classList.toggle('on', !!on); b.textContent = on ? '🎧 通话中' : '🎧 全双工语音'; }
-  }
 
   /* ---- Bot diagnostics panel: refresh / copy / download the trace ---- */
   function openDiag() {
@@ -744,7 +759,6 @@ window.PCDeluxe = (function () {
     $('game-settle-mask') && $('game-settle-mask').addEventListener('click', function () {
       var b = $('game-settle'); if (b) b.classList.add('hidden'); this.classList.add('hidden');
     });
-    $('btn-voice-live') && $('btn-voice-live').addEventListener('click', toggleVoice);
     initMarquee();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
@@ -753,7 +767,6 @@ window.PCDeluxe = (function () {
   return {
     bind: bind, onMembers: onMembers, onGameState: onGameState, renderGame: renderGame,
     setExpired: setExpired,
-    pipShowStatus: pipShowStatus,
     selectCard: function (id) { selected[id] = !selected[id]; },
     _selected: function () { return selected; }
   };

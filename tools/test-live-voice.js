@@ -1,16 +1,11 @@
 'use strict';
-/* Full-duplex AUDIO voice tests (v23).
+/* Encrypted voice-clip tests (v29).
  * Run: node tools/test-live-voice.js
- * Drives media.js in a VM with mocked WebRTC / mic / signaling to prove:
- *  1) startVoice pulls an AUDIO-ONLY mic stream (video:false)
- *  2) a recipient who never pressed the button AUTO-JOINS on an incoming offer
- *     (this is the bug that made the user's full-duplex test fail: !inCall drop)
- *  3) an answer is generated and sent back to the offerer
- *  4) glare: the impolite peer ignores a colliding offer, polite peer yields
- *  5) ICE candidates are forwarded as signals
- *  6) hangup stops tracks, closes peers and resets state
- *  7) no video track is ever added to a peer connection
- *  8) voice-clip format probing picks a supported mime + duration metadata
+ * Full-duplex live voice (WebRTC) has been REMOVED. This suite now proves:
+ *  1) the full-duplex implementation is genuinely gone from media.js
+ *  2) voice-clip format probing picks a supported mime + duration metadata
+ *  3) record -> encrypt -> send produces a proper encrypted file message
+ *  4) insecure contexts block recording with a clear diagnostic
  */
 const fs = require('fs');
 const vm = require('vm');
@@ -24,46 +19,6 @@ function check(name, ok, extra) {
 }
 
 const MEDIA_SRC = fs.readFileSync(path.join(__dirname, '..', 'client', 'src', 'media.js'), 'utf8');
-
-/* Minimal fake RTCPeerConnection implementing just the negotiation surface
- * media.js touches. Tracks offers/answers/ICE and signalingState transitions. */
-function FakePC(sid, log) {
-  this.sid = sid;
-  this._log = log;
-  this.localDescription = null;
-  this.remoteDescription = null;
-  this.signalingState = 'stable';
-  this.connectionState = 'connected';
-  this.tracks = [];
-  this.onicecandidate = null;
-  this.ontrack = null;
-  this.onnegotiationneeded = null;
-  this.onconnectionstatechange = null;
-  this._cands = [];
-  log.push('PC-CREATE ' + sid);
-}
-FakePC.prototype.addTrack = function (t, s) {
-  this.tracks.push(t);
-  this._log.push('ADD-TRACK ' + this.sid + ' ' + t.kind);
-  if (this.onnegotiationneeded) this.onnegotiationneeded();
-};
-FakePC.prototype.setLocalDescription = async function (d) {
-  if (d && d.type === 'rollback') { this.signalingState = 'stable'; return; }
-  // no-arg => create offer/answer based on current state
-  var type = this.signalingState === 'have-remote-offer' ? 'answer' : 'offer';
-  this.localDescription = { type: type, sdp: 'sdp-' + this.sid + '-' + type };
-  this.signalingState = type === 'offer' ? 'have-local-offer' : 'stable';
-  this._log.push('SET-LOCAL ' + this.sid + ' ' + type);
-};
-FakePC.prototype.setRemoteDescription = async function (d) {
-  this.remoteDescription = d;
-  this.signalingState = d.type === 'offer' ? 'have-remote-offer' : 'stable';
-  this._log.push('SET-REMOTE ' + this.sid + ' ' + d.type);
-};
-FakePC.prototype.createOffer = async function () { return { type: 'offer', sdp: 'sdp-' + this.sid }; };
-FakePC.prototype.createAnswer = async function () { return { type: 'answer', sdp: 'sdp-' + this.sid }; };
-FakePC.prototype.addIceCandidate = async function (c) { this._cands.push(c); this._log.push('ADD-ICE ' + this.sid); };
-FakePC.prototype.close = function () { this.connectionState = 'closed'; this._log.push('CLOSE ' + this.sid); };
 
 function makeSandbox(opts) {
   opts = opts || {};
@@ -82,7 +37,7 @@ function makeSandbox(opts) {
     console, Math, Date, JSON, Promise, Set, Map, Object, Array, String, Number, Error,
     TextEncoder: function () { this.encode = s => new Uint8Array(Buffer.from(s, 'utf8')); },
     TextDecoder: function () { this.decode = b => Buffer.from(b).toString('utf8'); },
-    setTimeout: (fn, ms) => setTimeout(fn, 0),   // run voice timers promptly but detached
+    setTimeout: (fn, ms) => setTimeout(fn, 0),
     clearTimeout: id => clearTimeout(id),
     setInterval: (fn, ms) => setInterval(fn, 1000000),
     clearInterval: id => clearInterval(id),
@@ -100,7 +55,6 @@ function makeSandbox(opts) {
       this.type = (opts && opts.type) || '';
       this.arrayBuffer = async () => new Uint8Array(Math.max(1, this.size)).buffer;
     },
-    RTCPeerConnection: function () { return new FakePC(opts.pcSid || 'me', log); },
     MediaRecorder: (function () {
       function R(stream, opts) {
         this.mimeType = (opts && opts.mimeType) || '';
@@ -153,104 +107,46 @@ function makeMedia(sb) {
     toast: () => {},
     sendKind: (text, kind) => sb.__sent.push({ type: 'sendKind', kind, text }),
     diag: (t, d) => sb.__diag.push(t + (d ? ':' + d : '')),
-    onRecordState: s => sb.__log.push('REC-STATE ' + s),
-    onLocalStream: () => {},
-    onRemoteTrack: (sid, stream) => sb.__log.push('REMOTE-TRACK ' + sid),
-    onCallEnd: () => sb.__log.push('CALL-END'),
-    onVoiceState: on => sb.__log.push('VOICE-STATE ' + on)
+    onRecordState: s => sb.__log.push('REC-STATE ' + s)
   };
   return new sb.PCMedia(ctx);
 }
 
 (async () => {
-  console.log('== Full-duplex audio voice ==');
+  console.log('== Encrypted voice clips (full-duplex voice removed) ==');
 
-  // 1) startVoice pulls audio-only stream and creates peers for members.
+  // 1) source-level: full-duplex implementation is genuinely gone.
   {
-    const sb = makeSandbox({ pcSid: 'meA' });
-    const m = makeMedia(sb);
-    await m.startVoice();
-    check('startVoice enters call', m.inCall() === true);
-    check('mic requested with audio-only (video:false)',
-      sb.__constraints.length >= 1 && sb.__constraints[0].video === false && !!sb.__constraints[0].audio,
-      JSON.stringify(sb.__constraints[0]));
-    check('peer connection created', sb.__log.some(x => x.indexOf('PC-CREATE ') === 0));
-    check('audio track added (never video)', sb.__log.some(x => x.indexOf('ADD-TRACK ') === 0 && x.endsWith(' audio')) &&
-      !sb.__log.some(x => x.toLowerCase().indexOf('video') !== -1));
+    check('no RTCPeerConnection', MEDIA_SRC.indexOf('RTCPeerConnection') === -1);
+    check('no startVoice API', MEDIA_SRC.indexOf('startVoice') === -1);
+    check('no handleSignal auto-join', MEDIA_SRC.indexOf('VOICE-AUTOJOIN') === -1);
+    check('no inCall API', MEDIA_SRC.indexOf('inCall') === -1);
+    check('recordVoice still present', MEDIA_SRC.indexOf('this.recordVoice') !== -1);
   }
 
-  // 2) Recipient who never called startVoice auto-joins on incoming offer.
-  {
-    const sb = makeSandbox({ pcSid: 'meB' });
-    sb.__mySid = 'meB';
-    sb.PCMembers = { all: () => [{ sid: 'peerA', ukPub: 'pubA' }], get: sid => ({ sid, ukPub: 'pub-' + sid }) };
-    const m = makeMedia(sb);
-    check('recipient starts idle', m.inCall() === false);
-    // Build a wrapped signal envelope for an offer from A.
-    const offerObj = { kind: 'description', description: { type: 'offer', sdp: 'sdp-A' } };
-    const wrapped = sb.PCCrypto.b64(new TextEncoder().encode(JSON.stringify({
-      iv: 'iv', ct: 'ct-' + JSON.stringify(offerObj), tag: 'tag', wrap: [1, 2, 3]
-    })));
-    await m.handleSignal('peerA', wrapped);
-    await flush();
-    check('recipient AUTO-JOINS on offer (no button press)', m.inCall() === true);
-    check('recipient pulled its own mic', sb.__constraints.length >= 1);
-    check('recipient did NOT drop the offer', sb.__diag.some(x => x.indexOf('VOICE-AUTOJOIN') === 0));
-    check('recipient set remote offer', sb.__log.some(x => x.indexOf('SET-REMOTE ') === 0 && x.endsWith(' offer')));
-    check('recipient generated + sent answer', sb.__log.some(x => x.indexOf('SET-LOCAL ') === 0 && x.endsWith(' answer')) &&
-      sb.__sent.some(f => f.type === 'rtc_signal' && f.to === 'peerA'));
-  }
-
-  // 3) ICE candidate forwarded as a signal even before local start (auto-join path).
-  {
-    const sb = makeSandbox({ pcSid: 'meB' });
-    sb.__mySid = 'meB';
-    sb.PCMembers = { all: () => [{ sid: 'peerA' }], get: sid => ({ sid, ukPub: 'pub' }) };
-    const m = makeMedia(sb);
-    const ice = { kind: 'ice', candidate: { candidate: 'candidate:1' } };
-    const wrapped = sb.PCCrypto.b64(new TextEncoder().encode(JSON.stringify({
-      iv: 'iv', ct: 'ct-' + JSON.stringify(ice), tag: 'tag', wrap: [1]
-    })));
-    await m.handleSignal('peerA', wrapped);
-    check('ICE handled via auto-join', sb.__log.some(x => x.indexOf('ADD-ICE ') === 0));
-  }
-
-  // 4) hangup resets everything.
-  {
-    const sb = makeSandbox({ pcSid: 'meA' });
-    const m = makeMedia(sb);
-    await m.startVoice();
-    m.hangup();
-    check('hangup exits call', m.inCall() === false);
-    check('hangup stops mic tracks', sb.__micStopped.length >= 1);
-    check('hangup closes peers', sb.__log.some(x => x.indexOf('CLOSE ') === 0));
-    check('hangup fires call-end', sb.__log.some(x => x === 'CALL-END'));
-  }
-
-  // 5) voice-clip format probing (via source-level assertions; MediaRecorder mock).
+  // 2) voice-clip format probing (via source-level assertions; MediaRecorder mock).
   {
     check('multi-codec probing present', MEDIA_SRC.indexOf('audio/webm;codecs=opus') !== -1 &&
       MEDIA_SRC.indexOf('audio/ogg;codecs=opus') !== -1 && MEDIA_SRC.indexOf('audio/mp4') !== -1);
     check('60s cap constant present', MEDIA_SRC.indexOf('MAX_VOICE_MS = 60000') !== -1);
     check('duration metadata in voice message', MEDIA_SRC.indexOf('voice: true, duration: dur') !== -1);
     check('secure-context guard present', MEDIA_SRC.indexOf('window.isSecureContext') !== -1);
-    check('dual audio+video false in recorder', MEDIA_SRC.indexOf('{ audio: true, video: false }') !== -1);
+    check('audio-only recorder constraint', MEDIA_SRC.indexOf('{ audio: true, video: false }') !== -1);
   }
 
-  // 6) voice-clip record -> encrypt -> send, dynamic flow.
+  // 3) voice-clip record -> encrypt -> send, dynamic flow.
   {
     const sb = makeSandbox({});
     const m = makeMedia(sb);
-    m.recordVoice();                       // begins async getUserMedia
+    m.recordVoice();
     await flush(); await flush();
     check('recorder created after mic grant', sb.__recorders.length === 1);
     check('recorder uses supported opus mime', sb.__recorders[0].mimeType === 'audio/webm;codecs=opus');
     const rec = sb.__recorders[0];
     check('recording started', rec.state === 'recording');
     check('record-state feedback shown true', sb.__log.some(x => x === 'REC-STATE true'));
-    // Simulate captured audio data, then stop.
     rec.ondataavailable({ data: { size: 123, byteLength: 123 } });
-    rec.stop();                            // fires onstop -> finalizeVoice (async)
+    rec.stop();
     await flush(); await flush(); await flush();
     const clip = sb.__sent.filter(f => f.type === 'sendKind' && f.kind === 'file');
     check('voice clip sent as file message', clip.length === 1);
@@ -265,7 +161,7 @@ function makeMedia(sb) {
     check('recording indicator cleared', sb.__log.some(x => x === 'REC-STATE false'));
   }
 
-  // 7) insecure context blocks recording with a clear diagnostic.
+  // 4) insecure context blocks recording with a clear diagnostic.
   {
     const sb = makeSandbox({ insecure: true });
     const m = makeMedia(sb);
@@ -277,4 +173,4 @@ function makeMedia(sb) {
 
   console.log('\nRESULT: ' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail === 0 ? 0 : 1);
-})().catch(e => { console.error('ERROR', e.stack || e.message); process.exit(1); });
+})().catch(e => { console.error(e); process.exit(1); });

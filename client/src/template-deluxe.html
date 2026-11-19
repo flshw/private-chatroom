@@ -25,7 +25,7 @@
     </div>
     <button id="btn-enter" class="primary">进入房间</button>
     <div class="status" id="gate-status"></div>
-    <div class="key-note" title="进入时在本机生成密钥对，私钥永不上传服务器">🔒 密钥仅存本机 · 3D / 语音 / 掼蛋全部端到端加密</div>
+    <div class="key-note" title="进入时在本机生成密钥对，私钥永不上传服务器">🔒 密钥仅存本机 · 掼蛋与聊天全部端到端加密</div>
   </div>
 </div>
 
@@ -35,7 +35,6 @@
     <div class="room-name"><span class="dot"></span><span id="room-name">私密聊天</span><span class="deluxe-badge">掼蛋版</span></div>
     <div class="top-meta"><span id="remain">—</span> · <span id="member-count">—</span><button class="icon" id="btn-game-diag" title="查看机器人行为诊断日志">🐞 诊断</button></div>
     <button class="tool-btn" id="btn-game" disabled>🃏 掼蛋</button>
-    <button class="tool-btn" id="btn-voice-live">🎧 全双工语音</button>
     <button class="icon" id="btn-members" title="成员列表">成员</button>
     <button class="icon exit" id="btn-exit" title="退出房间（清除本机密钥）">退出</button>
   </header>
@@ -66,6 +65,7 @@
     <div class="game-table" id="game-table"><div class="tip">点击「掼蛋」选择玩家后开局</div></div>
     <div class="game-log" id="game-log"></div>
     <div class="my-hand" id="my-hand"></div>
+    <div class="my-info-bar" id="my-info-bar" aria-live="polite"></div>
     <div class="game-bottom">
       <button class="tool-btn" id="btn-game-arrange" title="点击循环：平铺→堆叠→火力→少手">🀄 理牌</button>
       <button class="tool-btn" id="btn-game-play">出牌</button>

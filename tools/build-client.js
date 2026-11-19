@@ -61,13 +61,10 @@ const baseMarkers = [
   ['历史消息去重', 'state.msgKeys[dkey]'],
   ['历史sid归属', 'state.mySids[env.senderSid]'],
   ['成员表epoch', 'memberList.epoch != null'],
-  /* v23: full-duplex audio voice (auto-answer) + voice clips, both editions. */
-  ['全双工语音自动接听', 'VOICE-AUTOJOIN'],
-  ['语音glare处理', 'VOICE-GLARE-IGNORE'],
-  ['纯音频无视频', 'video: false'],
+  /* v29: full-duplex live voice REMOVED; encrypted voice clips kept. */
+  ['全双工语音已移除', html => html.indexOf('VOICE-AUTOJOIN') === -1 && html.indexOf('btn-voice-live') === -1 && html.indexOf('RTCPeerConnection') === -1],
   ['语音包多编码探测', 'audio/webm;codecs=opus'],
   ['语音包内联播放器', 'voice-clip'],
-  ['语音通话按钮', 'id="btn-voice-live"'],
   ['视频入口已移除', html => html.indexOf('id="btn-video"') === -1 && html.indexOf('video-overlay') === -1]
 ];
 
@@ -224,10 +221,10 @@ const deluxeMarkers = baseMarkers.concat([
   ['3D 引擎', 'window.PC3D = (function'],
   ['豪华版UI', 'window.PCDeluxe = (function'],
   /* Mobile / touch adaptation — keep these fixes from regressing on rebuild. */
-  ['移动顶栏两行布局', 'grid-template-areas:"name meta . exit" "game voice mem ."'],
+  ['移动顶栏两行布局', 'grid-template-areas:"name meta . exit" "game mem . ."'],
   ['移动手牌可滚到首尾', 'justify-content:safe center'],
   ['移动按钮44px触控', '.game-bottom .tool-btn{min-height:44px'],
-  ['全双工语音状态按钮', 'id="btn-voice-live"'],
+  ['全双工语音已移除', html => html.indexOf('btn-voice-live') === -1 && html.indexOf('pipShowStatus') === -1],
   ['录音状态反馈', 'b.classList.toggle(\'recording\', rec)'],
   ['触摸无粘滞悬停', '@media(hover:hover)'],
   ['输入字号防iOS缩放', '.composer input[type=text]{min-width:88px;padding:10px 11px;font-size:16px}'],
@@ -246,6 +243,16 @@ const deluxeMarkers = baseMarkers.concat([
   ['选对家接口', 'function requestStart(players, partnerSid)'],
   ['选对家UI', 'id="partner-picks"'],
   ['对家座位排布', 'seat2 (opposite) becomes the teammate'],
+  /* v29: compass seat layout + enlarged play button + 2-char gaps. */
+  ['座位按角色方位类名', "el.className = 'seat seat-pos-' + rolePos"],
+  ['自己在下方', "if (s && s.isMe) rolePos = 'bottom'"],
+  ['对家在上方', "else if (s && st.partnerSid === s.sid) rolePos = 'top'"],
+  ['对手在左右', "(oppSeen++ === 0) ? 'left' : 'right'"],
+  ['座位绝对定位', '.seat.seat-pos-top{left:50%;top:0;transform:translateX(-50%)}'],
+  ['出牌按钮8字符宽', '.game-bottom #btn-game-play{flex:0 0 8em;width:8em;min-width:0;max-width:8em}'],
+  ['按钮间隔2字符', '.game-bottom{display:flex;gap:2em;justify-content:center'],
+  ['我的信息条UI', 'id="my-info-bar"'],
+  ['我的信息条居中样式', '.my-info-bar{display:flex;gap:14px;align-items:center;justify-content:center;width:max-content'],
   ['结算面板UI', 'id="game-settle"'],
   ['确认下一局按钮', 'id="btn-settle-next"'],
   ['结算面板渲染', 'function renderSettle(st)'],
@@ -286,13 +293,11 @@ const deluxeMarkers = baseMarkers.concat([
   ['过牌回显计数', '_myPassPending'],
   ['名次合法性校验', 'FINISHED-REJECT'],
   ['重复出牌告警', 'PLAY-SUSPECT'],
-  /* v23: spectator feature removed, video removed, full-duplex voice fixed,
-   * voice-clip player added. These must hold in the built deluxe bundle. */
+  /* v29: spectator/video/full-duplex voice all removed; encrypted voice-clip
+   * player kept. These must hold in the built deluxe bundle. */
   ['旁观入口已移除', html => html.indexOf('btn-spectate') === -1 && html.indexOf('spectate-picker') === -1],
   ['视频通话已移除', html => html.indexOf('id="btn-video"') === -1 && html.indexOf('video-overlay') === -1 && html.indexOf('pip-video') === -1],
-  ['全双工语音自动接听', 'VOICE-AUTOJOIN'],
-  ['语音glare处理', 'VOICE-GLARE-IGNORE'],
-  ['纯音频轨道', 'video: false'],
+  ['全双工语音已移除', html => html.indexOf('VOICE-AUTOJOIN') === -1 && html.indexOf('btn-voice-live') === -1 && html.indexOf('RTCPeerConnection') === -1],
   ['语音包多编码探测', 'audio/webm;codecs=opus'],
   ['语音包60秒上限', 'MAX_VOICE_MS'],
   ['语音包播放器', 'voice-clip'],

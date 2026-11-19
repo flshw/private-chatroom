@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 CJS flshw@126.com — Private Chatroom deluxe styles. */
-/* Deluxe = full base style + 3D scene, game table, PiP video, live voice. */
+/* Deluxe = full base style + 3D scene + Guandan game table. */
 BASE_STYLES_PLACEHOLDER
 
 /* 3D ambient canvas sits behind everything inside #chat.
@@ -18,20 +18,12 @@ BASE_STYLES_PLACEHOLDER
 .tool-btn.muted{opacity:.58}
 .tool-btn.on{border-color:var(--ok);color:var(--ok)}
 
-/* Full-duplex voice is audio-only; the top-bar button shows call status
- * (class "on"). No PiP video window exists in this build. */
-
 /* v24: diagnostic button lives in the top bar next to the clock/status.
  * Keep it visually compact so it doesn't crowd the room name or exit button. */
 .top-meta #btn-game-diag{border:1px solid var(--line);background:var(--panel2);color:var(--ink);
   border-radius:8px;padding:3px 7px;margin-left:8px;font-size:12px;cursor:pointer;white-space:nowrap}
 .top-meta #btn-game-diag:hover{border-color:var(--brand)}
 .top-meta #btn-game-diag.on{border-color:var(--ok);color:var(--ok)}
-
-/* Voice live indicators. */
-.voice-dot{display:inline-flex;align-items:center;gap:5px;font-size:11px}
-.voice-dot i{width:7px;height:7px;border-radius:50%;background:#44506f;display:inline-block}
-.voice-dot.on i{background:var(--ok);box-shadow:0 0 7px var(--ok)}
 
 /* Guandan game panel: a translucent HUD laid OVER the live chat so chat stays
  * visible & usable while a match runs. Only its interactive children catch
@@ -68,9 +60,20 @@ BASE_STYLES_PLACEHOLDER
 .game-top .title{font-weight:700;font-size:16px}
 .game-top .level{color:var(--brand);font-size:13px}
 .game-top .spacer{flex:1}
-.game-seats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px}
-.seat{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center;font-size:12px;background:rgba(20,27,46,.6)}
+/* v29: the four seats sit around the table by role — me bottom, teammate
+ * (对家) top, the two opponents left/right. The centre stays open as the table
+ * felt; the played-card area (.game-table) follows below. */
+.game-seats{position:relative;height:172px;margin:2px 0 8px}
+.game-seats:after{content:'🃏';position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  font-size:40px;color:rgba(201,189,255,.10);pointer-events:none;user-select:none}
+.seat{border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center;font-size:12px;background:rgba(20,27,46,.6);
+  position:absolute;width:136px;overflow:hidden}
+.seat.seat-pos-top{left:50%;top:0;transform:translateX(-50%)}
+.seat.seat-pos-bottom{left:50%;bottom:0;transform:translateX(-50%)}
+.seat.seat-pos-left{left:0;top:50%;transform:translateY(-50%)}
+.seat.seat-pos-right{right:0;top:50%;transform:translateY(-50%)}
 .seat.me{border-color:var(--brand);box-shadow:0 0 0 2px rgba(91,140,255,.15)}
+.seat.is-partner{border-color:rgba(62,207,142,.6)}
 .seat.turn{border-color:var(--ok)}
 .seat .cnt{color:var(--muted);font-size:11px;margin-top:3px}
 /* Played cards stay CENTRED in the game panel; the text hint/log is the piece
@@ -127,11 +130,23 @@ BASE_STYLES_PLACEHOLDER
   .pcard-stack>.pcard:hover{transform:translateY(-9px);z-index:90!important}
 }
 
-/* v27: single control row — 理牌(循环) / 出牌 / 过牌.
- * Each button is a fixed ~4-Chinese-character width (4.6em), NOT stretched. */
-.game-bottom{display:flex;gap:10px;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
+/* v29: my info strip — sits just above the play buttons, centred (NOT full
+ * width). Shows me / remaining count / teammate / turn status. */
+.my-info-bar{display:flex;gap:14px;align-items:center;justify-content:center;width:max-content;
+  max-width:92%;margin:2px auto 6px;padding:6px 14px;border:1px solid var(--brand);
+  border-radius:10px;background:rgba(91,140,255,.14);font-size:13px;line-height:1.2}
+.my-info-bar.hidden{display:none}
+.my-info-bar b{color:var(--brand);font-size:14px}
+.my-info-bar .mi-turn{color:var(--ok);font-weight:700}
+.my-info-bar .mi-wait{color:var(--muted)}
+
+/* v29: single control row — 理牌(循环) / 出牌 / 过牌.
+ * 理牌/过牌 stay ~4-Chinese-char wide (4.6em); 出牌 is enlarged to 8em.
+ * A 2em gap (2 Chinese chars) separates each button. */
+.game-bottom{display:flex;gap:2em;justify-content:center;padding:8px 0 2px;border-top:1px solid var(--line)}
 .game-bottom .tool-btn{flex:0 0 4.6em;width:4.6em;min-width:0;max-width:4.6em;
   text-align:center;padding-left:2px;padding-right:2px;white-space:nowrap;overflow:hidden}
+.game-bottom #btn-game-play{flex:0 0 8em;width:8em;min-width:0;max-width:8em}
 .game-log{position:absolute;left:16px;top:59%;transform:translateY(-50%);z-index:6;
   width:224px;max-height:40vh;overflow-y:scroll;overflow-x:hidden;color:var(--ink);font-size:12.5px;line-height:1.7;
   border:1px solid var(--line);border-radius:12px;padding:10px 12px;
@@ -150,9 +165,9 @@ BASE_STYLES_PLACEHOLDER
   /* Top bar: two-row grid. A single flex row used to total 462px on a 390px
    * screen — the exit button was pushed off-screen and the room name wrapped
    * into a vertical stack of Chinese characters. Row 1 = name/status/exit,
-   * row 2 = the three action buttons. */
+   * row 2 = the game + members actions (live voice was removed). */
   .topbar{display:grid!important;grid-template-columns:auto auto 1fr auto;
-    grid-template-areas:"name meta . exit" "game voice mem .";
+    grid-template-areas:"name meta . exit" "game mem . .";
     gap:8px;padding:9px 12px}
   .topbar .room-name{grid-area:name;min-width:0;max-width:calc(100vw - 220px);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
@@ -160,7 +175,6 @@ BASE_STYLES_PLACEHOLDER
   .topbar .top-meta{grid-area:meta;margin-left:0;font-size:11px;white-space:nowrap}
   #btn-exit{grid-area:exit}
   #btn-game{grid-area:game}
-  #btn-voice-live{grid-area:voice}
   #btn-members{grid-area:mem}
   .topbar .tool-btn,.topbar .icon{min-height:40px}
   /* Member drawer inherits the taller two-row toolbar. */
@@ -189,8 +203,13 @@ BASE_STYLES_PLACEHOLDER
     background:rgba(10,14,28,.96);z-index:1;padding-right:4px}
   .cc-rank{font-size:11px;min-width:32px;padding:3px 5px;flex:0 0 auto}
 
-  .game-seats{grid-template-columns:repeat(2,1fr);gap:5px;margin-bottom:6px}
-  .seat{padding:6px 4px;font-size:11px}
+  .game-seats{height:150px;margin:2px 0 6px}
+  .game-seats:after{font-size:30px}
+  .seat{padding:5px 4px;font-size:11px;width:104px}
+  .seat.seat-pos-top{left:50%;top:0;transform:translateX(-50%)}
+  .seat.seat-pos-bottom{left:50%;bottom:0;transform:translateX(-50%)}
+  .seat.seat-pos-left{left:0;top:50%;transform:translateY(-50%)}
+  .seat.seat-pos-right{right:0;top:50%;transform:translateY(-50%)}
   .pcard{width:36px;height:52px;font-size:14px}
   .pcard-stack>.pcard{left:calc(8px * var(--i, 0));top:calc(18px * var(--i, 0))}
   .game-table{width:100%;max-height:130px;min-height:66px;padding:8px;gap:4px}
@@ -209,8 +228,9 @@ BASE_STYLES_PLACEHOLDER
     -webkit-overflow-scrolling:touch}
   /* 44px minimum touch target for every game control (arrange/pass/play in
    * the SAME bottom row after v24). */
-  .game-bottom{gap:6px;padding-top:6px}
+  .game-bottom{gap:2em;padding-top:6px}
   .game-bottom .tool-btn{min-height:44px;font-size:13px;flex:0 0 4.6em;width:4.6em;min-width:0;max-width:4.6em}
+  .game-bottom #btn-game-play{flex:0 0 8em;width:8em;max-width:8em}
   /* Settlement modal fits a narrow phone; seats keep the distinct play row. */
   #game-settle{min-width:0;width:92vw;padding:14px;max-height:86vh;overflow:auto}
   .settle-title{font-size:16px}
@@ -267,8 +287,14 @@ BASE_STYLES_PLACEHOLDER
   /* Title row is redundant with the toolbar's 掼蛋 button on a short screen. */
   .game-top{display:none}
 
-  .game-seats{grid-area:seats;grid-template-columns:repeat(4,1fr);gap:5px;margin:0;min-height:0}
-  .seat{padding:3px 4px;font-size:11px}
+  /* v29: compact role-based compass layout in the short landscape viewport. */
+  .game-seats{grid-area:seats;height:92px;margin:0}
+  .game-seats:after{font-size:22px}
+  .seat{padding:2px 4px;font-size:10px;width:88px}
+  .seat.seat-pos-top{left:50%;top:0;transform:translateX(-50%)}
+  .seat.seat-pos-bottom{left:50%;bottom:0;transform:translateX(-50%)}
+  .seat.seat-pos-left{left:0;top:50%;transform:translateY(-50%)}
+  .seat.seat-pos-right{right:0;top:50%;transform:translateY(-50%)}
   .seat .cnt{margin-top:1px}
 
   .game-table{grid-area:table;width:100%;max-width:none;min-height:0;max-height:none;height:100%;
@@ -295,9 +321,10 @@ BASE_STYLES_PLACEHOLDER
   .game-log:before{font-size:11px;margin-bottom:4px;padding-bottom:4px}
 
   /* v24: one full-width bottom row — 理牌(循环)/过牌/出牌 side by side. */
-  .game-bottom{grid-area:bottom;gap:6px;padding:0;margin:0;border:0;align-items:stretch}
+  .game-bottom{grid-area:bottom;gap:2em;padding:0;margin:0;border:0;align-items:stretch}
   .game-bottom .tool-btn{min-height:44px;min-width:0;max-width:4.6em;
     font-size:12px;padding:6px 2px;flex:0 0 4.6em;width:4.6em}
+  .game-bottom #btn-game-play{flex:0 0 8em;width:8em;max-width:8em}
 
   /* Modals must fit the short height. */
   #game-setup{padding:12px;gap:8px;max-height:92vh;overflow:auto}
@@ -335,7 +362,8 @@ BASE_STYLES_PLACEHOLDER
 .partner-chip.on{border-color:#ffcf7a;color:#ffcf7a;background:rgba(255,207,122,.12)}
 
 /* ---- Per-seat played cards (distinct position for each player) ---- */
-.seat{position:relative}
+/* v29: .seat is absolutely positioned by role (see .game-seats above); do NOT
+ * reset it to relative here or the compass layout collapses. */
 .seat .cnt.low{color:#ffcf7a;font-weight:800}
 .seat .cnt.out{color:var(--ok);font-weight:700}
 .seat .seat-play{display:flex;flex-wrap:wrap;gap:2px;justify-content:center;margin-top:5px;

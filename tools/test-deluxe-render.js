@@ -41,7 +41,7 @@ El.prototype.getBoundingClientRect = function () { return { left: 0, top: 0, rig
 El.prototype.closest = function () { return null; };
 El.prototype.setProperty = function () {};
 
-const ids = ['game-seats','game-table','my-hand','game-log','game-panel','card-counter',
+const ids = ['game-seats','game-table','my-info-bar','my-hand','game-log','game-panel','card-counter',
   'game-level','spectator-note','btn-game-play','btn-game-pass','btn-game-start',
   'game-settle','game-settle-mask','settle-title','settle-sub','settle-ranks',
   'btn-settle-next','btn-settle-close','player-picks','partner-picks','btn-game-start',

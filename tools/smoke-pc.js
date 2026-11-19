@@ -296,10 +296,11 @@ function buildFrame(cfg, uk, sid, seq, serverTs, plaintext, members) {
   const deluxeRes = await api('/rooms/' + cfg.roomId + '/client?edition=deluxe');
   check('可下载豪华版客户端',
     deluxeRes.status === 200 && /deluxe/.test(deluxeRes.headers.get('content-disposition') || ''));
-  check('豪华版含掼蛋/3D/全双工语音模块，旁观已移除',
+  check('豪华版含掼蛋/3D模块，旁观与全双工语音已移除',
     deluxeRes.text.indexOf('root.PCGame = api') !== -1 &&
     deluxeRes.text.indexOf('window.PC3D = (function') !== -1 &&
-    deluxeRes.text.indexOf('VOICE-AUTOJOIN') !== -1 &&
+    deluxeRes.text.indexOf('VOICE-AUTOJOIN') === -1 &&
+    deluxeRes.text.indexOf('id="btn-voice-live"') === -1 &&
     deluxeRes.text.indexOf('id="btn-spectate"') === -1);
   check('豪华版无外部资源引用',
     !/<script[^>]+src=/i.test(deluxeRes.text) && !/<link[^>]+href=/i.test(deluxeRes.text));

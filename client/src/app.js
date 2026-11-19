@@ -197,8 +197,6 @@
       updateMembersUI();
     } else if (f.type === PCProtocol.MSG.MSG_BROADCAST) {
       renderEnvelope(f.envelope, f.sig, f.senderPub);
-    } else if (f.type === PCProtocol.MSG.RTC_SIGNAL) {
-      if (media) media.handleSignal(f.from, f.encryptedSignal);
     } else if (f.type === PCProtocol.MSG.GAME_STATE) {
       if (window.PCDeluxe && window.PCDeluxe.onGameState) window.PCDeluxe.onGameState(f);
     } else if (f.type === PCProtocol.MSG.GAME_SPECTATE_STATE) {
@@ -480,12 +478,6 @@
           game.noteDiag(tag + (detail ? ' | ' + detail : ''));
         }
       },
-      onRemoteTrack: onRemoteTrack,
-      onLocalStream: onLocalStream,
-      onCallEnd: onCallEnd,
-      onVoiceState: function (on) {
-        var b = $('btn-voice-live'); if (b) b.classList.toggle('on', !!on);
-      },
       /* Mic gives immediate, unmistakable feedback: pending (dimmed),
        * recording (red pulse + elapsed seconds), or idle. */
       onRecordState: function (state) {
@@ -534,7 +526,6 @@
     toast('房间已到期或解散，聊天已锁定');
     if (countdown) clearInterval(countdown);
     if (net) net.close();
-    if (media && media.inCall()) media.hangup();
     /* Lock the deluxe game UI too: the room can be destroyed by the owner or
      * an admin while cards are on the table; without this, taps on 出牌/过牌
      * reached a closed socket and logged confusing "连接未就绪" rejects. */
@@ -553,7 +544,7 @@
     if (!window.confirm('确定退出当前聊天室吗？\n退出后本机密钥会被清除，下次进入需重新输入昵称。')) return;
     state.expired = false;
     if (countdown) { clearInterval(countdown); countdown = null; }
-    if (media) { try { if (media.inCall()) media.hangup(); } catch (e) {} media = null; }
+    media = null;
     if (net) { net.close(); net = null; }
     game = null;
     chatReady = false;
@@ -570,41 +561,6 @@
   }
 
   function isDeluxe() { return !!(window.PCDeluxe && window.PCDeluxe.renderGame); }
-  /* Live voice is audio-only: local mic is never played back (echo), remote
-   * streams are attached to hidden <audio> elements so they are heard without
-   * any video surface. Deluxe keeps a small call-status chip in the top bar. */
-  function ensureAudioHost() {
-    var host = $('voice-audio-host');
-    if (!host) {
-      host = document.createElement('div');
-      host.id = 'voice-audio-host';
-      host.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none';
-      document.body.appendChild(host);
-    }
-    return host;
-  }
-  function onLocalStream(stream) {
-    // Intentionally no playback for the local stream (avoid mic echo).
-    if (isDeluxe() && window.PCDeluxe.pipShowStatus) window.PCDeluxe.pipShowStatus(true);
-  }
-  function onRemoteTrack(sid, stream) {
-    var host = ensureAudioHost();
-    var old = host.querySelector('audio[data-sid="' + sid + '"]');
-    if (old) old.remove();
-    var a = document.createElement('audio');
-    a.setAttribute('data-sid', sid);
-    a.srcObject = stream;
-    a.autoplay = true;
-    a.playsInline = true;
-    host.appendChild(a);
-    var play = a.play(); if (play && play.catch) play.catch(function () {});
-    if (isDeluxe() && window.PCDeluxe.pipShowStatus) window.PCDeluxe.pipShowStatus(true);
-  }
-  function onCallEnd() {
-    var host = $('voice-audio-host'); if (host) host.innerHTML = '';
-    if (isDeluxe() && window.PCDeluxe.pipShowStatus) window.PCDeluxe.pipShowStatus(false);
-  }
-
   /* --- wire events --- */
   $('btn-enter').addEventListener('click', enter);
   $('nickname').addEventListener('keydown', function (e) { if (e.key === 'Enter') enter(); });
@@ -629,16 +585,6 @@
     e.target.value = '';
   });
   $('btn-voice').addEventListener('click', function () { if (media) media.recordVoice(); });
-  /* Live-voice toggle. Deluxe binds its own richer toggle (with state chip);
-   * for the simple edition this generic handler drives the same media API. */
-  (function bindLiveVoice() {
-    var b = $('btn-voice-live'); if (!b) return;
-    b.addEventListener('click', function () {
-      if (!media) return;
-      if (media.inCall()) { media.hangup(); toast('语音通话已关闭'); }
-      else { media.startVoice(); }
-    });
-  })();
   $('btn-exit').addEventListener('click', leaveRoom);
 
   boot();

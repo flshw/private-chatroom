@@ -250,9 +250,11 @@ const canonical = P.canonicalJSON;
     deluxe.indexOf('id="btn-video"') === -1 &&
     deluxe.indexOf('pip-video') === -1 &&
     deluxe.indexOf('video-overlay') === -1);
-  check('全双工语音自动接听与纯音频约束',
-    deluxe.indexOf('VOICE-AUTOJOIN') !== -1 &&
-    deluxe.indexOf('video: false') !== -1);
+  check('全双工语音已移除（保留加密语音包）',
+    deluxe.indexOf('VOICE-AUTOJOIN') === -1 &&
+    deluxe.indexOf('id="btn-voice-live"') === -1 &&
+    deluxe.indexOf('RTCPeerConnection') === -1 &&
+    deluxe.indexOf('MAX_VOICE_MS') !== -1);
   check('手牌选择器已改为 .pcard（不再覆盖登录 .card）',
     deluxe.indexOf('.pcard{width:44px') !== -1 &&
     deluxe.indexOf('.card{width:44px') === -1 &&

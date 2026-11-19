@@ -154,7 +154,6 @@ input[type=text]:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,14
   <footer class="composer">
     <button class="icon" id="btn-attach" title="发送文件（端到端加密）">📎</button>
     <button class="icon" id="btn-voice" title="录制语音包（端到端加密，最长 60 秒）">🎤</button>
-    <button class="icon" id="btn-voice-live" title="开启/关闭全双工语音通话">🎧</button>
     <button class="icon" id="btn-export" title="导出聊天记录到本地">导出</button>
     <input id="input" type="text" placeholder="输入消息，Enter 发送" autocomplete="off" />
     <button id="btn-send" class="primary">发送</button>
@@ -917,20 +916,13 @@ window.PCExport = (function () {
 /* Copyright (c) 2026 CJS flshw@126.com — Private Chatroom media. */
 'use strict';
 /*
- * Media helpers: full-duplex AUDIO-ONLY live voice over WebRTC mesh, plus
- * encrypted voice-clip recording and file transfer.
+ * Media helpers: encrypted voice-clip recording and file transfer.
  *
- * - Live voice: every member runs an RTCPeerConnection mesh. Signaling is
- *   wrapped per target member with that member's UK public key, so the server
- *   only ever relays ciphertext. A member who receives an offer AUTO-JOINS the
- *   call (pulls a local mic stream) instead of dropping it — this is what makes
- *   "full duplex" actually work when the other side never pressed a button.
- *   Perfect-negotiation glare handling prevents simultaneous-offer deadlock.
- * - Voice clips / files: bytes are encrypted client-side with a fresh K_file
- *   and that key is delivered as a normal E2EE message, so the server only
- *   stores ciphertext.
+ * Full-duplex live voice (WebRTC) has been REMOVED. Voice clips / files are
+ * encrypted client-side with a fresh K_file and that key is delivered as a
+ * normal E2EE message, so the server only ever stores ciphertext.
  *
- * There is intentionally NO video anywhere in this build.
+ * There is intentionally NO video and NO real-time call anywhere in this build.
  */
 window.PCMedia = function (ctx) {
   var self = this;
@@ -939,10 +931,6 @@ window.PCMedia = function (ctx) {
   var apiBase = config.serverUrl.replace(/\/$/, '') + PCProtocol.DEFAULTS.apiPrefix;
 
   var mediaRecorder = null, chunks = [];
-  var pcs = {};            // sid -> RTCPeerConnection
-  var makingOffer = {};    // sid -> boolean, perfect-negotiation glare guard
-  var localStream = null;
-  var voiceOn = false;
 
   var MAX_VOICE_MS = 60000;
   var MAX_VOICE_BYTES = 8 * 1024 * 1024;
@@ -1113,158 +1101,6 @@ window.PCMedia = function (ctx) {
     setTimeout(function () { URL.revokeObjectURL(rec.url); }, 4000);
   };
 
-  /* ---- Full-duplex AUDIO-ONLY live voice over WebRTC mesh ---- */
-  /* PCCrypto primitives (forge) are synchronous. Wrap them in a promise chain
-   * that also tolerates async implementations, so signaling never crashes on a
-   * .then of a plain object. This was a latent failure in the old media code. */
-  function wrapSignal(targetSid, obj) {
-    var target = ctx.members.get(targetSid);
-    if (!target) return Promise.resolve(null);
-    var text = JSON.stringify(obj);
-    return Promise.resolve().then(function () {
-      var K = PCCrypto.randomBytes(32);
-      var enc = PCCrypto.aesEncrypt(K, 'rtc|' + config.roomId, text);
-      return Promise.resolve(enc).then(function (e) {
-        return Promise.resolve(PCCrypto.wrapKey(K, target.ukPub)).then(function (wrap) {
-          return PCCrypto.b64(new TextEncoder().encode(JSON.stringify({
-            iv: e.iv, ct: e.ct, tag: e.tag, wrap: wrap
-          })));
-        });
-      });
-    });
-  }
-  function unwrapSignal(fromSid, b64str) {
-    var obj = JSON.parse(new TextDecoder().decode(PCCrypto.unb64(b64str)));
-    return Promise.resolve(PCCrypto.unwrapKey(obj.wrap, ctx.uk.privatePem)).then(function (K) {
-      return Promise.resolve(PCCrypto.aesDecrypt(K, 'rtc|' + config.roomId, obj.iv, obj.ct, obj.tag));
-    }).then(function (plain) {
-      return JSON.parse(new TextDecoder().decode(plain));
-    });
-  }
-  function sendSignal(sid, obj) {
-    return wrapSignal(sid, obj).then(function (w) {
-      if (w) net.send({ type: PCProtocol.MSG.RTC_SIGNAL, to: sid, encryptedSignal: w });
-    });
-  }
-  // Deterministic polite role: the lexicographically smaller sid yields on glare.
-  function isPolite(remoteSid) { return String(ctx.mySid) < String(remoteSid); }
-
-  function ensureLocalStream() {
-    if (localStream) return Promise.resolve(localStream);
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      return Promise.reject(new Error('当前环境不支持麦克风'));
-    }
-    pushDiag('VOICE-MIC-REQUEST', 'audio full-duplex');
-    return navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      video: false
-    }).then(function (stream) {
-      localStream = stream;
-      if (ctx.onLocalStream) ctx.onLocalStream(stream);
-      pushDiag('VOICE-MIC-OK', 'tracks=' + stream.getTracks().length);
-      return stream;
-    });
-  }
-
-  function peer(sid) {
-    if (pcs[sid]) return pcs[sid];
-    var pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun.qq.com:3478' }
-      ]
-    });
-    pcs[sid] = pc;
-    if (localStream) localStream.getTracks().forEach(function (t) { pc.addTrack(t, localStream); });
-
-    pc.ontrack = function (e) {
-      var stream = (e.streams && e.streams[0]) || new MediaStream([e.track]);
-      if (ctx.onRemoteTrack) ctx.onRemoteTrack(sid, stream);
-    };
-    pc.onicecandidate = function (e) {
-      if (e.candidate) sendSignal(sid, { kind: 'ice', candidate: e.candidate }).catch(function () {});
-    };
-    pc.onnegotiationneeded = function () {
-      makingOffer[sid] = true;
-      return pc.setLocalDescription().then(function () {
-        return sendSignal(sid, { kind: 'description', description: pc.localDescription });
-      }).catch(function (e) { pushDiag('VOICE-NEGO-ERR', sid + ' ' + (e && e.message)); })
-        .then(function () { makingOffer[sid] = false; });
-    };
-    pc.onconnectionstatechange = function () {
-      pushDiag('VOICE-PC-STATE', sid + ' ' + pc.connectionState);
-      if (pc.connectionState === 'failed') ctx.toast('与一位成员的语音连接失败，可关闭后重开语音');
-    };
-    return pc;
-  }
-
-  // Backward-compatible name used by app.js / deluxe.js.
-  this.startCall = function (voiceOnly) { return this.startVoice(); };
-
-  this.startVoice = async function () {
-    if (voiceOn) return;
-    if (!window.RTCPeerConnection) { ctx.toast('当前环境不支持语音通话'); return; }
-    try { await ensureLocalStream(); }
-    catch (e) { ctx.toast('无法访问麦克风：' + (e && e.message ? e.message : e)); return; }
-    voiceOn = true;
-    var others = PCMembers.all().filter(function (m) { return m.sid !== ctx.mySid; });
-    pushDiag('VOICE-ON', 'peers=' + others.length);
-    // Creating a peer + adding tracks fires onnegotiationneeded -> sends offers.
-    others.forEach(function (m) { peer(m.sid); });
-    if (!others.length) ctx.toast('语音已开启，等待其他成员加入（当前仅你一人）');
-    else ctx.toast('全双工语音已开启 · ' + others.length + ' 位成员');
-    if (ctx.onVoiceState) ctx.onVoiceState(true);
-  };
-
-  this.handleSignal = async function (fromSid, encryptedSignal) {
-    var sig;
-    try { sig = await unwrapSignal(fromSid, encryptedSignal); }
-    catch (e) { pushDiag('VOICE-SIG-DECRYPT-ERR', fromSid + ' ' + (e && e.message)); return; }
-
-    // KEY FIX: an incoming offer/ICE must be handled even if I never pressed
-    // the voice button. Auto-join so full-duplex works for the recipient too.
-    if (!voiceOn) {
-      try { await ensureLocalStream(); }
-      catch (e) { pushDiag('VOICE-AUTOJOIN-ERR', fromSid + ' ' + (e && e.message)); return; }
-      voiceOn = true;
-      pushDiag('VOICE-AUTOJOIN', fromSid);
-      if (ctx.onVoiceState) ctx.onVoiceState(true);
-    }
-
-    var pc = peer(fromSid);
-    var polite = isPolite(fromSid);
-    try {
-      if (sig.kind === 'description' && sig.description) {
-        var desc = sig.description;
-        var isOffer = desc.type === 'offer';
-        var collision = isOffer && (makingOffer[fromSid] || pc.signalingState !== 'stable');
-        var ignore = collision && !polite;
-        if (ignore) { pushDiag('VOICE-GLARE-IGNORE', fromSid); return; }
-        if (collision && polite) await pc.setLocalDescription({ type: 'rollback' });
-        await pc.setRemoteDescription(desc);
-        if (isOffer) {
-          await pc.setLocalDescription();  // creates the answer
-          await sendSignal(fromSid, { kind: 'description', description: pc.localDescription });
-          pushDiag('VOICE-ANSWER-SENT', fromSid);
-        }
-      } else if (sig.kind === 'ice' && sig.candidate) {
-        await pc.addIceCandidate(sig.candidate);
-      }
-    } catch (e) { pushDiag('VOICE-SIG-ERR', fromSid + ' ' + (e && e.message)); }
-  };
-
-  this.hangup = function () {
-    voiceOn = false;
-    for (var sid in pcs) { try { pcs[sid].close(); } catch (e) { /* noop */ } delete pcs[sid]; }
-    makingOffer = {};
-    if (localStream) localStream.getTracks().forEach(function (t) { t.stop(); });
-    localStream = null;
-    pushDiag('VOICE-OFF', '');
-    if (ctx.onCallEnd) ctx.onCallEnd();
-    if (ctx.onVoiceState) ctx.onVoiceState(false);
-  };
-  this.inCall = function () { return voiceOn; };
 };
 
 </script>
@@ -1468,8 +1304,6 @@ window.PCMedia = function (ctx) {
       updateMembersUI();
     } else if (f.type === PCProtocol.MSG.MSG_BROADCAST) {
       renderEnvelope(f.envelope, f.sig, f.senderPub);
-    } else if (f.type === PCProtocol.MSG.RTC_SIGNAL) {
-      if (media) media.handleSignal(f.from, f.encryptedSignal);
     } else if (f.type === PCProtocol.MSG.GAME_STATE) {
       if (window.PCDeluxe && window.PCDeluxe.onGameState) window.PCDeluxe.onGameState(f);
     } else if (f.type === PCProtocol.MSG.GAME_SPECTATE_STATE) {
@@ -1751,12 +1585,6 @@ window.PCMedia = function (ctx) {
           game.noteDiag(tag + (detail ? ' | ' + detail : ''));
         }
       },
-      onRemoteTrack: onRemoteTrack,
-      onLocalStream: onLocalStream,
-      onCallEnd: onCallEnd,
-      onVoiceState: function (on) {
-        var b = $('btn-voice-live'); if (b) b.classList.toggle('on', !!on);
-      },
       /* Mic gives immediate, unmistakable feedback: pending (dimmed),
        * recording (red pulse + elapsed seconds), or idle. */
       onRecordState: function (state) {
@@ -1805,7 +1633,6 @@ window.PCMedia = function (ctx) {
     toast('房间已到期或解散，聊天已锁定');
     if (countdown) clearInterval(countdown);
     if (net) net.close();
-    if (media && media.inCall()) media.hangup();
     /* Lock the deluxe game UI too: the room can be destroyed by the owner or
      * an admin while cards are on the table; without this, taps on 出牌/过牌
      * reached a closed socket and logged confusing "连接未就绪" rejects. */
@@ -1824,7 +1651,7 @@ window.PCMedia = function (ctx) {
     if (!window.confirm('确定退出当前聊天室吗？\n退出后本机密钥会被清除，下次进入需重新输入昵称。')) return;
     state.expired = false;
     if (countdown) { clearInterval(countdown); countdown = null; }
-    if (media) { try { if (media.inCall()) media.hangup(); } catch (e) {} media = null; }
+    media = null;
     if (net) { net.close(); net = null; }
     game = null;
     chatReady = false;
@@ -1841,41 +1668,6 @@ window.PCMedia = function (ctx) {
   }
 
   function isDeluxe() { return !!(window.PCDeluxe && window.PCDeluxe.renderGame); }
-  /* Live voice is audio-only: local mic is never played back (echo), remote
-   * streams are attached to hidden <audio> elements so they are heard without
-   * any video surface. Deluxe keeps a small call-status chip in the top bar. */
-  function ensureAudioHost() {
-    var host = $('voice-audio-host');
-    if (!host) {
-      host = document.createElement('div');
-      host.id = 'voice-audio-host';
-      host.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden;pointer-events:none';
-      document.body.appendChild(host);
-    }
-    return host;
-  }
-  function onLocalStream(stream) {
-    // Intentionally no playback for the local stream (avoid mic echo).
-    if (isDeluxe() && window.PCDeluxe.pipShowStatus) window.PCDeluxe.pipShowStatus(true);
-  }
-  function onRemoteTrack(sid, stream) {
-    var host = ensureAudioHost();
-    var old = host.querySelector('audio[data-sid="' + sid + '"]');
-    if (old) old.remove();
-    var a = document.createElement('audio');
-    a.setAttribute('data-sid', sid);
-    a.srcObject = stream;
-    a.autoplay = true;
-    a.playsInline = true;
-    host.appendChild(a);
-    var play = a.play(); if (play && play.catch) play.catch(function () {});
-    if (isDeluxe() && window.PCDeluxe.pipShowStatus) window.PCDeluxe.pipShowStatus(true);
-  }
-  function onCallEnd() {
-    var host = $('voice-audio-host'); if (host) host.innerHTML = '';
-    if (isDeluxe() && window.PCDeluxe.pipShowStatus) window.PCDeluxe.pipShowStatus(false);
-  }
-
   /* --- wire events --- */
   $('btn-enter').addEventListener('click', enter);
   $('nickname').addEventListener('keydown', function (e) { if (e.key === 'Enter') enter(); });
@@ -1900,16 +1692,6 @@ window.PCMedia = function (ctx) {
     e.target.value = '';
   });
   $('btn-voice').addEventListener('click', function () { if (media) media.recordVoice(); });
-  /* Live-voice toggle. Deluxe binds its own richer toggle (with state chip);
-   * for the simple edition this generic handler drives the same media API. */
-  (function bindLiveVoice() {
-    var b = $('btn-voice-live'); if (!b) return;
-    b.addEventListener('click', function () {
-      if (!media) return;
-      if (media.inCall()) { media.hangup(); toast('语音通话已关闭'); }
-      else { media.startVoice(); }
-    });
-  })();
   $('btn-exit').addEventListener('click', leaveRoom);
 
   boot();
