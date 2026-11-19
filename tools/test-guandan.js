@@ -117,5 +117,23 @@ check('不足两张大王不可抗贡', G.canResist({ 0: H('W17 S3'), 1: H('S4 S
   check('双下首出为进贡方(seat3)', tr.firstSeat === 3, 'first=' + tr.firstSeat);
 }
 
+/* v31 — official Guandan FIXED-LENGTH rules. These were the root cause of the
+ * illegal 777888999 play: classifyNormal() used to accept k>=2 consecutive
+ * triples, k>=3 pairs, and 5+ card straights/flushes. Official rules cap:
+ * 钢板=exactly 2 triples, 三连对=exactly 3 pairs, 顺子/同花顺=exactly 5 cards. */
+{
+  check('钢板777888(2组)合法', G.classify(H('S7 D7 H7 D8 C8 S8'), L).type === G.TYPE.TRIPLE_STRAIGHT);
+  check('钢板777888999(3组)非法', G.classify(H('S7 D7 H7 D8 C8 S8 C9 H9 S9'), L) === null,
+    JSON.stringify(G.classify(H('S7 D7 H7 D8 C8 S8 C9 H9 S9'), L)));
+  check('钢板444555666(3组)非法', G.classify(H('S4 H4 C4 S5 H5 C5 S6 H6 C6'), L) === null);
+  check('三连对334455(3对)合法', G.classify(H('S3 H3 S4 H4 S5 H5'), L).type === G.TYPE.DOUBLE_STRAIGHT);
+  check('三连对33445566(4对)非法', G.classify(H('S3 H3 S4 H4 S5 H5 S6 H6'), L) === null,
+    JSON.stringify(G.classify(H('S3 H3 S4 H4 S5 H5 S6 H6'), L)));
+  check('顺子6张(345678)非法', G.classify(H('S3 H4 C5 D6 S7 H8'), L) === null,
+    JSON.stringify(G.classify(H('S3 H4 C5 D6 S7 H8'), L)));
+  check('同花顺6张(345678)非法', G.classify(H('S3 S4 S5 S6 S7 S8'), L) === null,
+    JSON.stringify(G.classify(H('S3 S4 S5 S6 S7 S8'), L)));
+}
+
 console.log('\n=== 结果: ' + pass + ' 通过 / ' + fail + ' 失败 ===');
 process.exit(fail ? 1 : 0);

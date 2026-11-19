@@ -571,6 +571,18 @@ window.PCGameClient = (function () {
         state.seatPlays[msg.by] = { cards: (msg.cards || []).slice(), pattern: pattern };
         state.passes = 0;
         state.lastWinner = msg.by;  // only a PLAY (never a pass) may win the trick
+        // VALIDITY: check BEFORE recording the cards. The old code appended the
+        // cards to state.played first and then asked whether they were already
+        // there — which was true 100% of the time, so EVERY play emitted a false
+        // "all N cards already played" PLAY-SUSPECT warning (incl. in the user's
+        // diag log, making legal plays look like cheats). Snapshot the reused
+        // count first, then record the cards.
+        var reusedBefore = 0;
+        if (msg.by !== mySid && (msg.cards || []).length) {
+          reusedBefore = (msg.cards || []).filter(function (c) {
+            return state.played.some(function (p) { return p.id === c.id; });
+          }).length;
+        }
         (msg.cards || []).forEach(function (c) {
           if (!state.played.some(function (p) { return p.id === c.id; })) {
             state.played.push({ s: c.s, r: c.r, id: c.id });
@@ -581,16 +593,8 @@ window.PCGameClient = (function () {
         if (msg.by !== mySid) {
           state.playedBySeat[msg.by] = (state.playedBySeat[msg.by] || 0) + (msg.cards || []).length;
         }
-        // VALIDITY: warn (do not drop — liveness first) if a remote play
-        // reuses card ids already played this round. A tampered client could
-        // otherwise "replay" the same cards; the log makes it visible.
-        if (msg.by !== mySid && (msg.cards || []).length) {
-          var reused = (msg.cards || []).filter(function (c) {
-            return state.played.some(function (p) { return p.id === c.id; });
-          }).length;
-          if (reused === msg.cards.length) {
-            dlog('PLAY-SUSPECT', 'by=' + msg.by + ' all ' + reused + ' cards already played');
-          }
+        if (reusedBefore === msg.cards.length && (msg.cards || []).length) {
+          dlog('PLAY-SUSPECT', 'by=' + msg.by + ' all ' + reusedBefore + ' cards already played');
         }
         var seat = seatOfSid(msg.by);
         if (msg.by !== mySid) {

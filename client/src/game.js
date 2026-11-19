@@ -117,23 +117,29 @@
     // Straight-flush: same suit, 5+ consecutive ranks within 3..14.
     var sf = straightFlush(cards, level);
     if (sf) return sf;
-    // Straight: 5+ consecutive single ranks within 3..14.
-    var st = straightRanks(ranks, 5), stFlushCheck = null;
-    if (st && n >= 5 && ranks.length === n && maxRank(ranks) <= 14 && minRank(ranks) >= 3) {
-      return { type: TYPE.STRAIGHT, rank: cmpVal(ranks[ranks.length - 1], level), len: n, name: '顺子' };
+    // Straight: EXACTLY 5 consecutive single ranks within 3..A. Official
+    // Guandan rules cap a straight at five cards ("不可超过五张"), so 6+
+    // consecutive ranks are NOT a single straight and must be split/rejected.
+    var st = straightRanks(ranks, 5);
+    if (n === 5 && st && ranks.length === n && maxRank(ranks) <= 14 && minRank(ranks) >= 3) {
+      return { type: TYPE.STRAIGHT, rank: cmpVal(ranks[ranks.length - 1], level), len: 5, name: '顺子' };
     }
-    // Triple-straight (钢板): k>=2 consecutive triples.
-    if (n >= 6 && n % 3 === 0) {
+    // Triple-straight (钢板/三顺): EXACTLY 2 consecutive triples = 6 cards.
+    // Rule: "钢板: 二个连续三张牌, 不可超过2个" (333444 / 777888 legal; 777888999
+    // is NOT). The old `n % 3 === 0 && straightRanks(..., 2)` wrongly accepted
+    // 3+ groups, which is exactly the illegal 777888999 play in the user's log.
+    if (n === 6) {
       var tripRanks = ranks.filter(function (r) { return counts[r] === 3 && r <= 14; });
-      if (tripRanks.length === ranks.length && straightRanks(tripRanks, 2)) {
-        return { type: TYPE.TRIPLE_STRAIGHT, rank: cmpVal(tripRanks[tripRanks.length - 1], level), len: n, name: '钢板' };
+      if (tripRanks.length === 2 && tripRanks.length === ranks.length && straightRanks(tripRanks, 2)) {
+        return { type: TYPE.TRIPLE_STRAIGHT, rank: cmpVal(tripRanks[tripRanks.length - 1], level), len: 6, name: '钢板' };
       }
     }
-    // Double-straight (三连对): k>=3 consecutive pairs.
-    if (n >= 6 && n % 2 === 0) {
+    // Double-straight (三连对): EXACTLY 3 consecutive pairs = 6 cards.
+    // Rule: "三连对: 三对的连续对牌, 不可超过3对" (334455 / 778899 legal).
+    if (n === 6) {
       var pairRanks = ranks.filter(function (r) { return counts[r] === 2 && r <= 14; });
-      if (pairRanks.length === ranks.length && ranks.length >= 3 && straightRanks(pairRanks, 3)) {
-        return { type: TYPE.DOUBLE_STRAIGHT, rank: cmpVal(pairRanks[pairRanks.length - 1], level), len: n, name: '三连对' };
+      if (pairRanks.length === 3 && pairRanks.length === ranks.length && straightRanks(pairRanks, 3)) {
+        return { type: TYPE.DOUBLE_STRAIGHT, rank: cmpVal(pairRanks[pairRanks.length - 1], level), len: 6, name: '三连对' };
       }
     }
     // Four-with-two: four of a rank + any two kickers.
@@ -166,13 +172,16 @@
     return true;
   }
   function straightFlush(cards, level) {
-    if (cards.length < 5 || cards.some(isJoker)) return null;
+    /* Official Guandan: 同花顺 is EXACTLY five consecutive same-suit ranks.
+     * A longer same-suit run is NOT a 同花顺 (and not a 顺子 either — straights
+     * are capped at 5). The old `length < 5` check let 6+ card flushes through. */
+    if (cards.length !== 5 || cards.some(isJoker)) return null;
     var suit = cards[0].s;
     if (!cards.every(function (c) { return c.s === suit; })) return null;
     var ranks = cards.map(function (c) { return c.r; }).sort(function (a, b) { return a - b; });
     if (ranks[ranks.length - 1] > 14 || ranks[0] < 3) return null;
     if (!straightRanks(ranks, 5)) return null;
-    return { type: TYPE.STFLUSH, rank: cmpVal(ranks[ranks.length - 1], level), len: cards.length, name: '同花顺' };
+    return { type: TYPE.STFLUSH, rank: cmpVal(ranks[ranks.length - 1], level), len: 5, name: '同花顺' };
   }
 
   /* Candidate proxies a wild card may imitate (never a joker). */

@@ -106,6 +106,12 @@
      * split into consecutive 5-card chunks; a trailing remainder < 5 stays in
      * the pool for other combos instead of forming an over-long straight. */
     var MAX_RUN = 5;
+    /* v31 official rules: 三连对 = exactly 3 consecutive pairs (6 cards),
+     * 钢板 = exactly 2 consecutive triples (6 cards). A longer run must be
+     * split into fixed-size chunks; the tail (<3 pairs / <2 triples) stays in
+     * the pool. classify() now rejects over-long groups, so emitting the whole
+     * run would just fail take() and leave the cards unsorted. */
+    var MAX_PAIRS = 3, MAX_TRIPLES = 2;
     function takeStraightFlushes() {
       ['S', 'H', 'C', 'D'].forEach(function (suit) {
         var sc = pool.filter(function (c) { return c.s === suit && c.r >= 3 && c.r <= 14; });
@@ -137,19 +143,23 @@
     function takeDoubleStraights() {
       var cnt = rankCounts(pool);
       var pairRanks = Object.keys(cnt).map(Number).filter(function (r) { return cnt[r] >= 2 && r <= 14; });
-      consecutiveRuns(pairRanks, 3).forEach(function (run) {
-        var cs = [];
-        run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 2)); });
-        take(cs);
+      consecutiveRuns(pairRanks, MAX_PAIRS).forEach(function (run) {
+        for (var i = 0; i + MAX_PAIRS <= run.length; i += MAX_PAIRS) {
+          var cs = [];
+          run.slice(i, i + MAX_PAIRS).forEach(function (r) { cs = cs.concat(pickRank(pool, r, 2)); });
+          take(cs);
+        }
       });
     }
     function takeTripleStraights() {
       var cnt = rankCounts(pool);
       var tripRanks = Object.keys(cnt).map(Number).filter(function (r) { return cnt[r] >= 3 && r <= 14; });
-      consecutiveRuns(tripRanks, 2).forEach(function (run) {
-        var cs = [];
-        run.forEach(function (r) { cs = cs.concat(pickRank(pool, r, 3)); });
-        take(cs);
+      consecutiveRuns(tripRanks, MAX_TRIPLES).forEach(function (run) {
+        for (var i = 0; i + MAX_TRIPLES <= run.length; i += MAX_TRIPLES) {
+          var cs = [];
+          run.slice(i, i + MAX_TRIPLES).forEach(function (r) { cs = cs.concat(pickRank(pool, r, 3)); });
+          take(cs);
+        }
       });
     }
     /* v25: 三带二 is intentionally NOT fused into a 5-card combo any more —
@@ -262,7 +272,8 @@
     var jokers = hand.filter(function (c) { return c.s === 'W'; });
     if (jokers.length >= 4) maybe(jokers.slice(0, 4));
     if (jokers.length >= 2) maybe(jokers.slice(0, 2));
-    // Straight (5+ consecutive ranks, one card each, 3..A).
+    // Enumerate every contiguous sub-run (>=2 ranks) of rankList; callbacks
+    // filter to the exact length their pattern family requires.
     function eachRun(rankList, perRank, fn) {
       for (var len = rankList.length; len >= 2; len--) {
         for (var i = 0; i + len <= rankList.length; i++) {
@@ -273,32 +284,36 @@
         }
       }
     }
+    // Straight: EXACTLY 5 consecutive ranks (official rule 不可超过五张).
     eachRun(ranks, 1, function (run) {
+      if (run.length !== 5) return;
       var cs = [];
       run.forEach(function (r) { var c = pickRank(hand, r, 1)[0]; if (c) cs.push(c); });
       maybe(cs);
     });
-    // Double straights: 3+ consecutive ranks, two of each.
+    // Double straights (三连对): EXACTLY 3 consecutive pairs = 6 cards.
     var pairRanks = ranks.filter(function (r) { return cnt[r] >= 2 && r <= 14; });
     eachRun(pairRanks, 2, function (run) {
-      if (run.length < 3) return;
+      if (run.length !== 3) return;
       var cs = [];
       run.forEach(function (r) { cs = cs.concat(pickRank(hand, r, 2)); });
       maybe(cs);
     });
-    // Triple straights (钢板): 2+ consecutive ranks, three of each.
+    // Triple straights (钢板/三顺): EXACTLY 2 consecutive triples = 6 cards.
+    // 777888999 (3 groups) is NOT legal and must never be emitted.
     var tripRanks = ranks.filter(function (r) { return cnt[r] >= 3 && r <= 14; });
     eachRun(tripRanks, 3, function (run) {
+      if (run.length !== 2) return;
       var cs = [];
       run.forEach(function (r) { cs = cs.concat(pickRank(hand, r, 3)); });
       maybe(cs);
     });
-    // Straight flushes: same suit, 5+ consecutive ranks.
+    // Straight flushes: EXACTLY 5 consecutive ranks, same suit.
     ['S', 'H', 'C', 'D'].forEach(function (suit) {
       var sc = hand.filter(function (c) { return c.s === suit && c.r >= 3 && c.r <= 14; });
       var sranks = unique(sc.map(function (c) { return c.r; })).sort(function (a, b) { return a - b; });
       eachRun(sranks, 1, function (run) {
-        if (run.length < 5) return;
+        if (run.length !== 5) return;
         var cs = [];
         run.forEach(function (r) { var c = sc.filter(function (x) { return x.r === r; })[0]; if (c) cs.push(c); });
         maybe(cs);
@@ -383,23 +398,28 @@
     // Straight flushes FIRST: they share the same 5 cards as a plain straight
     // and addDirect() de-dupes by card ids, so the stronger pattern must claim
     // the key first (otherwise a plain straight shadows the straight flush).
+    // Official fixed lengths: 同花顺/顺子 = 5 ranks, 连对 = 3 pairs (6 cards),
+    // 钢板 = 2 triples (6 cards). Longer runs are illegal, so enumerate only
+    // the exact lengths the engine accepts (addDirect also re-validates).
     ['S', 'H', 'C', 'D'].forEach(function (suit) {
-      for (var len = 5; len <= 12; len++) {
-        for (var start = 3; start + len - 1 <= 14; start++) {
-          var run = [];
-          for (var k = 0; k < len; k++) run.push(start + k);
-          fillRun(run, 1, T.STFLUSH, suit);           // straight flush
-        }
+      for (var start = 3; start + 5 - 1 <= 14; start++) {
+        var run = [];
+        for (var k = 0; k < 5; k++) run.push(start + k);
+        fillRun(run, 1, T.STFLUSH, suit);           // 同花顺 (5)
       }
     });
-    for (var len = 5; len <= 12; len++) {
-      for (var start = 3; start + len - 1 <= 14; start++) {
-        var run = [];
-        for (var k = 0; k < len; k++) run.push(start + k);
-        fillRun(run, 1, T.STRAIGHT, null);             // straight
-        if (len >= 3) fillRun(run, 2, T.DOUBLE_STRAIGHT, null); // 连对
-        if (len >= 2) fillRun(run, 3, T.TRIPLE_STRAIGHT, null); // 钢板
-      }
+    for (var start = 3; start + 5 - 1 <= 14; start++) {
+      var run5 = [];
+      for (var k = 0; k < 5; k++) run5.push(start + k);
+      fillRun(run5, 1, T.STRAIGHT, null);             // 顺子 (5)
+    }
+    for (var start = 3; start + 3 - 1 <= 14; start++) {
+      var run3 = [start, start + 1, start + 2];
+      fillRun(run3, 2, T.DOUBLE_STRAIGHT, null);      // 连对 (3 pairs = 6 cards)
+    }
+    for (var start = 3; start + 2 - 1 <= 14; start++) {
+      var run2 = [start, start + 1];
+      fillRun(run2, 3, T.TRIPLE_STRAIGHT, null);      // 钢板 (2 triples = 6 cards)
     }
   }
 

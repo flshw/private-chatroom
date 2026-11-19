@@ -332,6 +332,10 @@ const deluxeMarkers = baseMarkers.concat([
   }],
   ['机器人牌型用引擎权威描述符', 'var real = G.classify(cs, level);   // authoritative descriptor'],
   ['顺子封顶5张', 'var MAX_RUN = 5;'],
+  ['钢板恰好2组(禁777888999)', 'tripRanks.length === 2 && tripRanks.length === ranks.length'],
+  ['三连对恰好3对', 'pairRanks.length === 3 && pairRanks.length === ranks.length'],
+  ['同花顺恰好5张', 'if (cards.length !== 5 || cards.some(isJoker)) return null;'],
+  ['重复告警先查后记(无误报)', 'var reusedBefore = 0;'],
   ['三带二不合并', '三带二 is intentionally NOT fused'],
   ['三张先于对子', 'if (cnt[r] >= 3) take(pickRank(pool, r, 3));'],
   ['机器人复用昵称池', 'BOT_NAME_SEEDS']

@@ -83,5 +83,29 @@ check('机器人自对战能正常分出胜负（至少 3 家出完）', sp.fini
   'finished=' + sp.finished.length + ' turns=' + sp.guard);
 check('自对战未在步数上限卡死', sp.guard < 600, 'turns=' + sp.guard);
 
+/* v31: the bot must never emit the illegal 9-card "777888999" steel plate
+ * that appeared in the user's diag log. Its hand holds 7/8/9 triples plus
+ * filler; candidates() must cap every triple-straight at exactly 6 cards. */
+{
+  function H(spec) {
+    return spec.trim().split(/\s+/).map(function (x, i) {
+      var s = x[0], rs = x.slice(1);
+      var r = rs === 'T' ? 10 : rs === 'J' ? 11 : rs === 'Q' ? 12 : rs === 'K' ? 13 :
+        rs === 'A' ? 14 : rs === '2' ? 15 : (+rs);
+      return { s: s, r: r, id: 'x' + i };
+    });
+  }
+  const hand = H('S7 D7 H7 C7 D8 C8 S8 H8 C9 H9 S9 D9 S3 H4');
+  const cands = B.candidates(hand, 15, G);
+  const steel = cands.filter(g => g.pattern.type === G.TYPE.TRIPLE_STRAIGHT);
+  const overlong = steel.filter(g => g.cards.length !== 6);
+  check('机器人候选不含超长钢板(>6张)', overlong.length === 0,
+    steel.map(g => g.cards.length).join(','));
+  check('机器人仍识别出6张钢板', steel.length > 0 && steel.every(g => g.cards.length === 6),
+    steel.map(g => g.cards.length).join(','));
+  check('不存在777888999(9张)候选',
+    !cands.some(g => g.cards.length === 9 && g.pattern.type === G.TYPE.TRIPLE_STRAIGHT));
+}
+
 console.log('\n=== 结果: ' + passed + ' 通过 / ' + failed + ' 失败 ===');
 process.exit(failed ? 1 : 0);

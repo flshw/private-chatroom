@@ -93,6 +93,31 @@ console.log('\n=== 机器人诊断日志测试 ===');
   check('同步发送异常被记录为 SEND-SYNC-ERR', /SEND-SYNC-ERR/.test(game.diagText()));
 }
 
+// Test 4: PLAY-SUSPECT must be a TRUE signal, not a false alarm on every play.
+// Regression: onPlay used to append the cards to state.played BEFORE checking
+// whether they were already there — so every remote play matched and logged
+// "all N cards already played" (see the user's 777888999 diag log). Now the
+// reuse count is snapshotted before recording.
+{
+  const sb = makeSandbox();
+  const game = makeGame(sb);
+  const st = seed(game, G.deal(G.makeDeck()));
+  const c1 = { s: 'S', r: 7, id: 'steel1' };
+  // A brand-new remote play of a card never seen before must NOT be flagged.
+  game.onMessage({ kind: 'play', by: 'bot_1', round: st.roundNo, cards: [c1],
+    pattern: { type: 1, rank: 7, len: 1 } });
+  const afterFirst = game.diagText();
+  check('正常出牌不误报 PLAY-SUSPECT', !/PLAY-SUSPECT/.test(afterFirst),
+    afterFirst.split('\n').filter(l => /PLAY-SUSPECT/.test(l)).join(' | '));
+
+  // The SAME card id played again by a remote seat IS a genuine replay.
+  game.onMessage({ kind: 'play', by: 'bot_2', round: st.roundNo, cards: [c1],
+    pattern: { type: 1, rank: 7, len: 1 } });
+  const afterReplay = game.diagText();
+  check('真实重复出牌才告警 PLAY-SUSPECT', /PLAY-SUSPECT/.test(afterReplay),
+    afterReplay.split('\n').filter(l => /PLAY-SUSPECT/.test(l)).join(' | '));
+}
+
 // Test 3: async rejection from sendGame is logged (the critical blind spot).
 {
   const sb = makeSandbox();
