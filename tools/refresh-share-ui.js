@@ -107,11 +107,17 @@ function rebuildOne(file) {
     if (APPLY) {
       const bak = file + '.bak-ui-' + Date.now();
       fs.copyFileSync(file, bak);
+      // Preserve the original owner/mode: the service runs as an unprivileged
+      // user (e.g. chatroom). Running this tool as root with a fresh temp file
+      // would otherwise leave root-owned caches the service cannot read.
+      const st = fs.statSync(file);
       const tmp = file + '.new-' + process.pid;
-      fs.writeFileSync(tmp, r.out, { mode: 0o600 });
+      fs.writeFileSync(tmp, r.out, { mode: st.mode & 0o777 });
+      try { fs.chownSync(tmp, st.uid, st.gid); }
+      catch (e) { /* not root: temp inherits our uid, same as original owner */ }
       fs.renameSync(tmp, file); // atomic replace; shares.resolve reads whole file
       changed++;
-      console.log('  -> WRITTEN (backup ' + path.basename(bak) + ')');
+      console.log('  -> WRITTEN uid=' + st.uid + ' gid=' + st.gid + ' (backup ' + path.basename(bak) + ')');
     }
   }
   console.log('RESULT scanned=' + files.length + ' changed=' + changed + ' errors=' + errors + ' apply=' + APPLY);
