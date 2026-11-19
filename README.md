@@ -31,6 +31,8 @@
 
 建房或在「我的房间」下载时可选择版本；下载会重新签发（轮换 joinToken 与房间签名密钥），旧客户端与旧二维码立即失效。公开房间目录只展示房间名、状态、剩余时间与在线人数，不泄露准入凭证。
 
+**分享链接的缓存与 UI 升级**：分享码返回的是房间签发时缓存的签名 HTML（`data/shares/<sha256>.html`），因此重建客户端模板后，已签发房间的旧分享码仍会显示旧界面。若只需更新界面而不想让旧二维码失效（重签会轮换 joinToken 与房间密钥、踢出在线用户），在服务器执行 `node tools/refresh-share-ui.js --apply`：它把每个缓存中**原样保留的签名 config 块**移植进最新模板并原子替换缓存，分享码、roomId、joinToken、房间密钥、过期时间与签名全部字节级不变，仅更新 HTML/CSS/JS 展示层。默认不带 `--apply` 为只读预演；非默认数据目录用 `--shares-dir=<dir> --template-dir=<dir>` 指定。已下载的独立 HTML 客户端不受此工具影响，需房主重新下载（会重签）。
+
 本地验证结果（2026-11-16）：
 
 - `node tools/test-guandan.js`：**45 / 45 通过**（掼蛋牌型/逢人配/进贡还贡抗贡/升级规则）
@@ -53,6 +55,7 @@ server/admin/index.html          运维总览（管理员令牌保护）
 client/src/                      单文件客户端源码
 client/dist/private-chat.template.html  构建产物，保留 __PC_CONFIG__ 占位符
 tools/build-client.js            构建单文件模板
+tools/refresh-share-ui.js        升级已签发房间分享链接的 UI 外壳（不重签、保留凭证）
 tools/verify-pc-crypto.js        加密互通专项测试
 tools/smoke-pc.js                端到端冒烟测试
 docs/17-私密聊天-需求分析报告.md
