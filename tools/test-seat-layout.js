@@ -122,7 +122,12 @@ check('CSS 有 seat-pos-top 绝对定位', deluxe.indexOf('.seat.seat-pos-top{le
 check('无本人座位框（源码已跳过 isMe）', deluxe.indexOf('if (s && s.isMe) continue;') !== -1);
 check('记牌器与级别同行容器 game-headrow', deluxe.indexOf('class="game-headrow"') !== -1 && deluxe.indexOf('.game-headrow{display:flex') !== -1);
 check('游戏聊天侧栏 UI', deluxe.indexOf('id="game-chat"') !== -1);
-check('游戏聊天侧栏样式(右侧对称)', deluxe.indexOf('.game-chat{right:16px}') !== -1);
+check('游戏聊天侧栏样式(右侧对称)', deluxe.indexOf('.game-chat{right:10px}') !== -1);
+check('侧栏退到外侧(10px)', deluxe.indexOf('.game-log{left:10px}') !== -1 && deluxe.indexOf('.game-chat{right:10px}') !== -1);
+check('v32 牌桌核心容器 game-core 包住座位与出牌区', deluxe.indexOf('class="game-core"') !== -1 && deluxe.indexOf('.game-core{position:relative;width:min(100%,560px)') !== -1);
+check('v32 对家贴出牌区上方(top:0)', deluxe.indexOf('.seat.seat-pos-top{left:50%;top:0;transform:translateX(-50%)}') !== -1);
+check('v32 两对手贴出牌区左右(left/right:-142px)', deluxe.indexOf('.seat.seat-pos-left{left:-142px') !== -1 && deluxe.indexOf('.seat.seat-pos-right{right:-142px') !== -1);
+check('v32 出牌区由 core 承载(100%)', deluxe.indexOf('.game-table{width:100%;min-height:96px') !== -1);
 check('牌局动态高度加大(66vh)', deluxe.indexOf('max-height:66vh') !== -1);
 check('app 镜像聊天到游戏侧栏', deluxe.indexOf("var gchat = $('game-chat');") !== -1);
 check('CSS 出牌按钮 8em', deluxe.indexOf('#btn-game-play{flex:0 0 8em;width:8em') !== -1);
