@@ -66,7 +66,9 @@
       <div class="game-seats" id="game-seats"></div>
       <div class="game-table" id="game-table"><div class="tip">点击「掼蛋」选择玩家后开局</div></div>
     </div>
+    <button class="side-tab side-tab-log" id="tab-game-log" type="button" title="点按呼出牌局动态">牌局动态</button>
     <div class="game-log" id="game-log"></div>
+    <button class="side-tab side-tab-chat" id="tab-game-chat" type="button" title="点按呼出游戏聊天">游戏聊天</button>
     <div class="game-chat" id="game-chat" aria-live="polite"></div>
     <div class="my-hand" id="my-hand"></div>
     <div class="my-info-bar" id="my-info-bar" aria-live="polite"></div>
@@ -112,6 +114,15 @@
 </div>
 
 <div id="toast" class="toast hidden"></div>
+
+<!-- v33: 竖屏不支持掼蛋 HUD，强制横屏：竖屏时覆盖提示层 -->
+<div id="rotate-hint" aria-live="polite">
+  <div class="rot-box">
+    <div class="rot-icon">📱↻</div>
+    <div class="rot-title">请将手机横屏使用掼蛋</div>
+    <div class="rot-sub">当前为竖屏模式。请把设备旋转至横屏后继续游戏，<br>牌桌与聊天会按横屏布局自动适配窗口大小。</div>
+  </div>
+</div>
 
 <script>
 /*__PROTOCOL__*/

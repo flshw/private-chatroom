@@ -40,8 +40,8 @@ El.prototype.querySelectorAll = function () { return []; };
 El.prototype.getBoundingClientRect = function () { return { left: 0, top: 0, right: 10, bottom: 10, width: 10, height: 10 }; };
 El.prototype.closest = function () { return null; };
 
-const ids = ['game-seats','game-table','my-info-bar','my-hand','game-log','game-panel','card-counter',
-  'game-level','btn-game-play','btn-game-pass','btn-game-start','game-settle','game-settle-mask',
+const ids = ['game-seats','game-table','my-info-bar','my-hand','game-log','game-chat','game-panel','card-counter',
+  'tab-game-log','tab-game-chat','game-level','btn-game-play','btn-game-pass','btn-game-start','game-settle','game-settle-mask',
   'settle-title','settle-sub','settle-ranks','btn-settle-next','btn-settle-close','player-picks',
   'partner-picks','toast','diag-panel','diag-body'];
 const byId = {};
@@ -116,6 +116,22 @@ console.log('\n=== v30 座位方位 + 记牌器同行 + 侧栏 + 按钮尺寸测
   check('换座位后另两人在左右', pos[0] === 'left' && pos[2] === 'right', JSON.stringify(pos));
 }
 
+// v33: click a collapsed side tab to float its panel out; clicking the other
+// tab closes the first. Tabs were bound at module load (wire() ran already).
+{
+  const tabLog = byId['tab-game-log'], tabChat = byId['tab-game-chat'];
+  const log = byId['game-log'], chat = byId['game-chat'];
+  check('侧栏呼出按钮已绑定点击', !!(tabLog._listeners && tabLog._listeners.click && tabLog._listeners.click.length));
+  if (tabLog._listeners && tabLog._listeners.click) {
+    tabLog._listeners.click[0]();
+    check('点击牌局动态标签呼出面板', log.classList.contains('rail-open'));
+    if (tabChat._listeners && tabChat._listeners.click) {
+      tabChat._listeners.click[0]();
+      check('点击游戏聊天标签切换:前者关闭', !log.classList.contains('rail-open') && chat.classList.contains('rail-open'));
+    }
+  }
+}
+
 // Built HTML assertions
 const deluxe = fs.readFileSync(path.join(__dirname, '..', 'client', 'dist', 'private-chat-deluxe.template.html'), 'utf8');
 check('CSS 有 seat-pos-top 绝对定位', deluxe.indexOf('.seat.seat-pos-top{left:50%;top:0;transform:translateX(-50%)}') !== -1);
@@ -124,11 +140,15 @@ check('记牌器与级别同行容器 game-headrow', deluxe.indexOf('class="game
 check('游戏聊天侧栏 UI', deluxe.indexOf('id="game-chat"') !== -1);
 check('游戏聊天侧栏样式(右侧对称)', deluxe.indexOf('.game-chat{right:10px}') !== -1);
 check('侧栏退到外侧(10px)', deluxe.indexOf('.game-log{left:10px}') !== -1 && deluxe.indexOf('.game-chat{right:10px}') !== -1);
-check('v32 牌桌核心容器 game-core 包住座位与出牌区', deluxe.indexOf('class="game-core"') !== -1 && deluxe.indexOf('.game-core{position:relative;width:min(100%,560px)') !== -1);
-check('v32 对家贴出牌区上方(top:0)', deluxe.indexOf('.seat.seat-pos-top{left:50%;top:0;transform:translateX(-50%)}') !== -1);
-check('v32 两对手贴出牌区左右(left/right:-142px)', deluxe.indexOf('.seat.seat-pos-left{left:-142px') !== -1 && deluxe.indexOf('.seat.seat-pos-right{right:-142px') !== -1);
-check('v32 出牌区由 core 承载(100%)', deluxe.indexOf('.game-table{width:100%;min-height:96px') !== -1);
-check('牌局动态高度加大(66vh)', deluxe.indexOf('max-height:66vh') !== -1);
+check('v33 牌桌核心容器 game-core 包住座位与出牌区(随缩放)', deluxe.indexOf('class="game-core"') !== -1 && deluxe.indexOf('.game-core{position:relative;width:min(100%,calc(560px * var(--ui-scale)))') !== -1);
+check('v33 核心顶部留白防对家框压住出牌区', deluxe.indexOf('--core-top:calc(84px * var(--ui-scale))') !== -1 && deluxe.indexOf('padding-top:var(--core-top)') !== -1);
+check('v33 对家贴出牌区上方(top:0)', deluxe.indexOf('.seat.seat-pos-top{left:50%;top:0;transform:translateX(-50%)}') !== -1);
+check('v33 两对手贴出牌区左右(随缩放)', deluxe.indexOf('.seat.seat-pos-left{left:calc(-142px * var(--ui-scale))') !== -1 && deluxe.indexOf('.seat.seat-pos-right{right:calc(-142px * var(--ui-scale))') !== -1);
+check('v33 出牌区由 core 承载且加高', deluxe.indexOf('.game-table{width:100%;min-height:calc(200px * var(--ui-scale))') !== -1);
+check('v33 牌局动态/游戏聊天加高(78vh)', deluxe.indexOf('min-height:calc(280px * var(--ui-scale));max-height:78vh') !== -1);
+check('v33 侧栏窄宽度收缩标签与呼出逻辑', deluxe.indexOf('id="tab-game-log"') !== -1 && deluxe.indexOf('rails-collapsed') !== -1 && deluxe.indexOf("panel.classList.toggle('rails-collapsed', narrow)") !== -1);
+check('v33 竖屏旋转提示 + 强制横屏', deluxe.indexOf('id="rotate-hint"') !== -1 && deluxe.indexOf('@media(orientation:portrait) and (max-width:820px)') !== -1);
+check('v33 窗体缩放变量(--ui-scale)', deluxe.indexOf("root.style.setProperty('--ui-scale'") !== -1 && deluxe.indexOf('calc(13px * var(--ui-scale))') !== -1);
 check('app 镜像聊天到游戏侧栏', deluxe.indexOf("var gchat = $('game-chat');") !== -1);
 check('CSS 出牌按钮 8em', deluxe.indexOf('#btn-game-play{flex:0 0 8em;width:8em') !== -1);
 check('CSS 按钮间隔 2em', deluxe.indexOf('.game-bottom{display:flex;gap:2em;justify-content:center') !== -1);

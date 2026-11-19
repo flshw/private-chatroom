@@ -243,18 +243,19 @@ window.PCDeluxe = (function () {
       // top-left rank+suit pip, so a player can read and tap a single card.
       var stack = document.createElement('div');
       stack.className = 'pcard-stack';
-      // Footprint must match the CURRENT card size. Cards shrink on portrait
-      // phones (36x52 / 8/18) and again on short landscape screens (30x44 /
-      // 6/12); desktop numbers here would leave big gaps and waste the little
-      // vertical room a landscape phone has. Keep these in sync with the CSS
-      // media queries (max-width:720px and orientation:landscape+max-height).
-      var cardW = 44, cardH = 62, stepX = 10, stepY = 22;
-      if (window.matchMedia) {
-        if (window.matchMedia('(orientation:landscape) and (max-height:520px)').matches) {
-          cardW = 30; cardH = 44; stepX = 6; stepY = 12;
-        } else if (window.matchMedia('(max-width:720px)').matches) {
-          cardW = 36; cardH = 52; stepX = 8; stepY = 18;
-        }
+      // Footprint must match the CURRENT card size. v33: desktop cards are
+      // scaled by --ui-scale (JS reads it back from <html>); short landscape
+      // phones use a compact 30x44 / 6/12 grid. The old portrait branch is
+      // gone — portrait is blocked by the rotate hint. Keep in sync with CSS.
+      var scale = 1;
+      try {
+        var ds = document.documentElement;
+        var v = ds && ds.style ? ds.style.getPropertyValue('--ui-scale') : '';
+        var f = parseFloat(v); if (f > 0) scale = f;
+      } catch (e) {}
+      var cardW = 44 * scale, cardH = 62 * scale, stepX = 10 * scale, stepY = 22 * scale;
+      if (window.matchMedia && window.matchMedia('(orientation:landscape) and (max-height:520px)').matches) {
+        cardW = 30; cardH = 44; stepX = 6; stepY = 12;
       }
       // Reserve the fanned footprint so cards don't overflow the hand row.
       stack.style.width = (cardW + stepX * (g.cards.length - 1)) + 'px';
@@ -739,6 +740,61 @@ window.PCDeluxe = (function () {
     game.nextRound(); // host redeals; non-host sees "等待房主" and just waits
   }
 
+  /* v33 — one unitless scale for every game box + font. JS owns the value so
+   * it can react to any window resize (CSS-alone cannot do vw/vh -> number).
+   * Clamped .85..1.25 so a tiny window never collapses the HUD and a 4K window
+   * never blows it past the screen. CSS has a :root default before JS boots. */
+  function applyUiScale() {
+    try {
+      var w = window.innerWidth || 1280, h = window.innerHeight || 800;
+      var s = Math.min(w / 1600, h / 900);
+      if (!isFinite(s) || s <= 0) s = 1;
+      s = Math.max(0.85, Math.min(1.25, s));
+      var root = document.documentElement;
+      if (root && root.style && root.style.setProperty) {
+        root.style.setProperty('--ui-scale', String(Math.round(s * 1000) / 1000));
+      }
+    } catch (e) { /* non-browser test hosts: keep the CSS default */ }
+  }
+
+  /* v33 — narrow windows shrink the two side panels to edge tabs. A tap on a
+   * tab floats that panel over the table; tapping again (or the other tab)
+   * closes it. Landscape phones keep their grid columns (no tabs), so they
+   * are excluded from the collapse rule. */
+  function updateRails() {
+    var panel = $('game-panel');
+    if (!panel || !panel.classList) return;
+    var w = window.innerWidth || 1280, h = window.innerHeight || 800;
+    var shortLandscape = (w > h) && h <= 520;
+    var narrow = w < 1180 && !shortLandscape;
+    panel.classList.toggle('rails-collapsed', narrow);
+    if (!narrow) {
+      var l = $('game-log'), c = $('game-chat');
+      if (l && l.classList) l.classList.remove('rail-open');
+      if (c && c.classList) c.classList.remove('rail-open');
+    }
+  }
+
+  function bindSideRails() {
+    var pairs = [
+      ['tab-game-log', 'game-log', 'game-chat', 'tab-game-chat'],
+      ['tab-game-chat', 'game-chat', 'game-log', 'tab-game-log']
+    ];
+    pairs.forEach(function (p) {
+      var tab = $(p[0]);
+      if (!tab || !tab.addEventListener) return;
+      tab.addEventListener('click', function () {
+        var mine = $(p[1]), other = $(p[2]), otherTab = $(p[3]);
+        if (!mine || !mine.classList) return;
+        var open = !mine.classList.contains('rail-open');
+        mine.classList.toggle('rail-open', open);
+        if (other && other.classList) other.classList.remove('rail-open');
+        if (tab.setAttribute) tab.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (otherTab && otherTab.setAttribute) otherTab.setAttribute('aria-expanded', 'false');
+      });
+    });
+  }
+
   function wire() {
     $('btn-game') && $('btn-game').addEventListener('click', toggleGame);
     $('btn-game-start') && $('btn-game-start').addEventListener('click', onStartClick);
@@ -761,6 +817,14 @@ window.PCDeluxe = (function () {
     $('game-settle-mask') && $('game-settle-mask').addEventListener('click', function () {
       var b = $('game-settle'); if (b) b.classList.add('hidden'); this.classList.add('hidden');
     });
+    // v33: responsive scale + collapsible side rails.
+    bindSideRails();
+    applyUiScale();
+    updateRails();
+    if (window.addEventListener) {
+      window.addEventListener('resize', function () { applyUiScale(); updateRails(); });
+      window.addEventListener('orientationchange', function () { applyUiScale(); updateRails(); });
+    }
     initMarquee();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
